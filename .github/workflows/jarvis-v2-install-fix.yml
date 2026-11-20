@@ -1,0 +1,137 @@
+name: Jarvis V2 Install Fix APK Build
+
+on:
+  push:
+    branches:
+      - 'jarvis-v2-install-fix**'
+      - 'fix/**'
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-validate-v2-fix:
+    name: Build, Validate, and Package JARVIS V2.0.1 APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out fix branch
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+
+      - name: Install required Android SDK packages
+        run: |
+          yes | sdkmanager --licenses >/dev/null
+          sdkmanager \
+            "platforms;android-35" \
+            "build-tools;34.0.0" \
+            "ndk;27.0.12077973" \
+            "cmake;3.22.1"
+
+      - name: Run unit tests, Android Lint, and build JARVIS V2.0.1 APK
+        run: |
+          chmod +x ./gradlew
+          ./gradlew :app:testV2FixUnitTest :app:lintV2Fix :app:assembleV2Fix --no-daemon --stacktrace
+
+      - name: Validate APK archive, manifest, alignment, and V1/V2/V3 signing
+        run: |
+          set -euo pipefail
+          APK="app/build/outputs/apk/v2Fix/JARVIS-V2-INSTALL-FIX-2.0.1.apk"
+          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          BUILD_TOOLS="$SDK_ROOT/build-tools/34.0.0"
+
+          test -s "$APK"
+          SIZE_BYTES="$(stat -c '%s' "$APK")"
+          echo "APK size: $SIZE_BYTES bytes"
+          test "$SIZE_BYTES" -lt 500000000
+
+          echo "=== Archive integrity (unzip -t) ==="
+          unzip -tq "$APK"
+
+          echo "=== Manifest XML validation (aapt2 dump xmltree) ==="
+          XML_TREE="$("$BUILD_TOOLS/aapt2" dump xmltree --file AndroidManifest.xml "$APK")"
+          printf '%s\n' "$XML_TREE" | sed -n '1,40p'
+
+          echo "=== Badging & ABI compatibility (aapt2 dump badging) ==="
+          BADGING_FILE="$(mktemp)"
+          "$BUILD_TOOLS/aapt2" dump badging "$APK" > "$BADGING_FILE"
+          grep -E "package:|sdkVersion:|targetSdkVersion:|application-label:|native-code:" "$BADGING_FILE"
+          grep -Fq "name='app.shilex.android.v2fix'" "$BADGING_FILE"
+          grep -Fq "versionCode='3'" "$BADGING_FILE"
+          grep -Fq "versionName='2.0.1'" "$BADGING_FILE"
+          grep -Fq "sdkVersion:'29'" "$BADGING_FILE"
+          grep -Fq "targetSdkVersion:'35'" "$BADGING_FILE"
+          grep -Fq "arm64-v8a" "$BADGING_FILE"
+          rm -f "$BADGING_FILE"
+
+          echo "=== ZIP alignment validation (zipalign -c -p 4) ==="
+          "$BUILD_TOOLS/zipalign" -c -p 4 "$APK"
+
+          echo "=== APK Signature validation (apksigner verify) ==="
+          VERIFY_FILE="$(mktemp)"
+          "$BUILD_TOOLS/apksigner" verify --verbose --min-sdk-version 29 --max-sdk-version 35 --print-certs "$APK" > "$VERIFY_FILE"
+          cat "$VERIFY_FILE"
+          grep -Fxq "Verifies" "$VERIFY_FILE"
+          grep -Eq "Verified using v(2|3) scheme .*: true" "$VERIFY_FILE"
+          grep -Fq "Number of signers: 1" "$VERIFY_FILE"
+          rm -f "$VERIFY_FILE"
+
+      - name: Stage APK, build info, and SHA-256 checksum
+        run: |
+          set -euo pipefail
+          APK="app/build/outputs/apk/v2Fix/JARVIS-V2-INSTALL-FIX-2.0.1.apk"
+          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          BUILD_TOOLS="$SDK_ROOT/build-tools/34.0.0"
+
+          STAGE="app/build/outputs/dist-v2-install-fix"
+          rm -rf "$STAGE"
+          mkdir -p "$STAGE"
+          cp "$APK" "$STAGE/JARVIS-V2-INSTALL-FIX-2.0.1.apk"
+
+          (
+            cd "$STAGE"
+            sha256sum JARVIS-V2-INSTALL-FIX-2.0.1.apk > JARVIS-V2-INSTALL-FIX-2.0.1.apk.sha256
+          )
+
+          {
+            echo "JARVIS V2 Install-Fix Build Information"
+            echo "======================================="
+            echo "APK Filename: JARVIS-V2-INSTALL-FIX-2.0.1.apk"
+            echo "Package ID: app.shilex.android.v2fix"
+            echo "Version Name: 2.0.1"
+            echo "Version Code: 3"
+            echo "Min SDK: 29 (Android 10)"
+            echo "Target SDK: 35 (Android 15)"
+            echo "Commit SHA: ${GITHUB_SHA:-local}"
+            echo "Branch/Ref: ${GITHUB_REF_NAME:-local}"
+            echo "APK Size (bytes): $(stat -c '%s' "$STAGE/JARVIS-V2-INSTALL-FIX-2.0.1.apk")"
+            echo "SHA-256: $(cat "$STAGE/JARVIS-V2-INSTALL-FIX-2.0.1.apk.sha256")"
+            echo ""
+            echo "--- Signing Verification ---"
+            "$BUILD_TOOLS/apksigner" verify --verbose --min-sdk-version 29 --max-sdk-version 35 --print-certs "$STAGE/JARVIS-V2-INSTALL-FIX-2.0.1.apk"
+          } > "$STAGE/BUILD_INFO.txt"
+
+          ls -lh "$STAGE"
+
+      - name: Upload JARVIS-V2-INSTALL-FIX-2.0.1 ZIP artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: JARVIS-V2-INSTALL-FIX-2.0.1
+          path: app/build/outputs/dist-v2-install-fix/
+          if-no-files-found: error
+          retention-days: 14

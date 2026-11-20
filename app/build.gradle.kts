@@ -1,4 +1,5 @@
 import java.security.MessageDigest
+import java.util.Base64
 
 plugins {
     alias(libs.plugins.android.application)
@@ -24,6 +25,12 @@ android {
     // password (from the macOS Keychain) as environment variables. Without them the release
     // build is unsigned. Android installs an update only if it is signed with this same key.
     val releaseKeystore = System.getenv("SHILEX_KEYSTORE")
+    val v2FixKeystoreFile = layout.buildDirectory.file("generated/signing/v2-install-fix.keystore").get().asFile
+    val v2FixKeystoreB64 = file("v2-install-fix.keystore.base64")
+    if (v2FixKeystoreB64.exists() && (!v2FixKeystoreFile.exists() || v2FixKeystoreFile.length() == 0L)) {
+        v2FixKeystoreFile.parentFile.mkdirs()
+        v2FixKeystoreFile.writeBytes(Base64.getMimeDecoder().decode(v2FixKeystoreB64.readText(Charsets.UTF_8)))
+    }
     signingConfigs {
         if (releaseKeystore != null) {
             create("release") {
@@ -32,6 +39,16 @@ android {
                 keyAlias = "jarvis"
                 keyPassword = System.getenv("SHILEX_KEYSTORE_PASSWORD")
             }
+        }
+        create("v2Fix") {
+            storeFile = v2FixKeystoreFile
+            storePassword = "jarvisv2fix"
+            keyAlias = "jarvisv2"
+            keyPassword = "jarvisv2fix"
+            enableV1Signing = true
+            enableV2Signing = true
+            enableV3Signing = true
+            enableV4Signing = false
         }
     }
 
@@ -45,6 +62,12 @@ android {
             initWith(getByName("debug"))
             applicationIdSuffix = ".v2"
             matchingFallbacks += listOf("debug")
+        }
+        create("v2Fix") {
+            initWith(getByName("debug"))
+            applicationIdSuffix = ".v2fix"
+            matchingFallbacks += listOf("debug")
+            signingConfig = signingConfigs.getByName("v2Fix")
         }
     }
     compileOptions {
@@ -197,6 +220,13 @@ androidComponents {
             output.versionName.set("2.0.0")
         }
     }
+    onVariants(selector().withBuildType("v2Fix")) { variant ->
+        variant.outputs.forEach { output ->
+            output.versionCode.set(3)
+            output.versionName.set("2.0.1")
+        }
+        variant.packaging.jniLibs.useLegacyPackaging.set(true)
+    }
 }
 
 tasks.matching { it.name == "assembleV2" }.configureEach {
@@ -209,6 +239,20 @@ tasks.matching { it.name == "assembleV2" }.configureEach {
         val targetApk = v2OutDir.resolve("JARVIS-V2-STABILITY-2.0.0.apk")
         sourceApk.copyTo(targetApk, overwrite = true)
         logger.lifecycle("Version 2 APK emitted: ${targetApk.absolutePath} (${targetApk.length()} bytes)")
+    }
+}
+
+tasks.matching { it.name == "assembleV2Fix" }.configureEach {
+    doLast {
+        val outDir = layout.buildDirectory.dir("outputs/apk/v2Fix").get().asFile
+        val sourceApk = outDir.resolve("app-v2Fix.apk").takeIf { it.exists() }
+            ?: outDir.listFiles { f ->
+                f.isFile && f.extension == "apk" && f.name != "JARVIS-V2-INSTALL-FIX-2.0.1.apk"
+            }?.firstOrNull()
+            ?: throw GradleException("Expected built v2Fix APK in ${outDir.absolutePath}")
+        val targetApk = outDir.resolve("JARVIS-V2-INSTALL-FIX-2.0.1.apk")
+        sourceApk.copyTo(targetApk, overwrite = true)
+        logger.lifecycle("Version 2.0.1 APK emitted: ${targetApk.absolutePath} (${targetApk.length()} bytes)")
     }
 }
 
