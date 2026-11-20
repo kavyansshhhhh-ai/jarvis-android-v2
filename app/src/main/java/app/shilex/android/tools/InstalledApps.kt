@@ -10,6 +10,7 @@ import android.os.Build
 import app.shilex.android.Diag
 import java.text.Collator
 import java.util.Locale
+import java.util.concurrent.Executors
 
 data class InstalledAppInfo(
     val label: String,
@@ -218,13 +219,16 @@ object AppCatalog {
 object InstalledAppsRegistry {
     @Volatile private var initialized = false
     @Volatile private var cachedApps: List<InstalledAppInfo> = emptyList()
+    private val refreshLock = Any()
+    private val refreshExecutor = Executors.newSingleThreadExecutor { runnable ->
+        Thread(runnable, "installed-apps-index").apply { isDaemon = true }
+    }
 
     fun init(context: Context) {
         val appContext = context.applicationContext
         if (initialized) return
         synchronized(this) {
             if (initialized) return
-            refresh(appContext)
             val filter = IntentFilter().apply {
                 addAction(Intent.ACTION_PACKAGE_ADDED)
                 addAction(Intent.ACTION_PACKAGE_REMOVED)
@@ -234,7 +238,7 @@ object InstalledAppsRegistry {
             }
             val receiver = object : BroadcastReceiver() {
                 override fun onReceive(ctx: Context?, intent: Intent?) {
-                    refresh(appContext)
+                    refreshAsync(appContext)
                 }
             }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -244,14 +248,25 @@ object InstalledAppsRegistry {
             }
             initialized = true
         }
+        refreshAsync(appContext)
     }
+
+    fun refreshAsync(context: Context, onUpdated: ((List<InstalledAppInfo>) -> Unit)? = null) {
+        val appContext = context.applicationContext
+        refreshExecutor.execute {
+            val apps = refresh(appContext)
+            onUpdated?.invoke(apps)
+        }
+    }
+
+    fun cachedApps(): List<InstalledAppInfo> = cachedApps
 
     fun apps(context: Context, forceRefresh: Boolean = false): List<InstalledAppInfo> {
         if (forceRefresh || cachedApps.isEmpty()) refresh(context.applicationContext)
         return cachedApps
     }
 
-    fun refresh(context: Context): List<InstalledAppInfo> {
+    fun refresh(context: Context): List<InstalledAppInfo> = synchronized(refreshLock) {
         val pm = context.packageManager
         val launcherIntent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
         val launchActivities = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {

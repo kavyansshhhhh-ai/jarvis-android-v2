@@ -7,6 +7,7 @@ import android.graphics.Path
 import android.graphics.Rect
 import android.os.Build
 import android.os.Bundle
+import android.os.SystemClock
 import android.view.Display
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
@@ -53,6 +54,7 @@ class ControlService : AccessibilityService() {
     // across screen snapshots because they become stale and retain the view hierarchy.
     @Volatile private var lastMeta: Map<Int, NodeMeta> = emptyMap()
     @Volatile private var lastElementsList: List<ScreenElement> = emptyList()
+    @Volatile private var lastContentSyncAtMs = 0L
 
     override fun onServiceConnected() {
         instance = this
@@ -60,11 +62,21 @@ class ControlService : AccessibilityService() {
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
+        if (!app.shilex.android.orb.FloatingOrb.isPotentiallyActive()) return
         when (event?.eventType) {
             AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED,
             AccessibilityEvent.TYPE_WINDOWS_CHANGED,
-            AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED,
-            -> app.shilex.android.orb.FloatingOrb.sync(this)
+            -> {
+                lastContentSyncAtMs = SystemClock.elapsedRealtime()
+                app.shilex.android.orb.FloatingOrb.sync(this)
+            }
+            AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED -> {
+                val now = SystemClock.elapsedRealtime()
+                if (now - lastContentSyncAtMs >= CONTENT_SYNC_THROTTLE_MS) {
+                    lastContentSyncAtMs = now
+                    app.shilex.android.orb.FloatingOrb.sync(this)
+                }
+            }
         }
     }
 
@@ -726,6 +738,7 @@ class ControlService : AccessibilityService() {
 
     companion object {
         private const val MAX_SCREEN_STATE_ELEMENTS = 100
+        private const val CONTENT_SYNC_THROTTLE_MS = 350L
 
         @Volatile var instance: ControlService? = null
             private set

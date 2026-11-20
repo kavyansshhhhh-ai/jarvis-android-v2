@@ -126,10 +126,12 @@ class VoiceSession private constructor(private val app: Application) : LiveClien
     @Volatile private var resumeHandle: String? = null
     @Volatile private var droppingReply = false
     @Volatile private var lastActivity = 0L
+    private val turnLock = Any()
     private var retries = 0
     private var watchdog: Job? = null
     private var replyWaitJob: Job? = null
     private var endAfterReplyJob: Job? = null
+    private var connectJob: Job? = null
 
     // Timings for the diagnostic log (never the words themselves).
     private var connectAt = 0L
@@ -252,6 +254,8 @@ class VoiceSession private constructor(private val app: Application) : LiveClien
         ControlService.instance?.overlay?.cancelPending()
         watchdog?.cancel()
         watchdog = null
+        connectJob?.cancel()
+        connectJob = null
         replyWaitJob?.cancel()
         replyWaitJob = null
         endAfterReplyJob?.cancel()
@@ -260,8 +264,12 @@ class VoiceSession private constructor(private val app: Application) : LiveClien
         client.close()
         speaker.flush()
         clearRetainedReplyAudio()
-        turnReceivedAudio = false
-        lastAssistantTurnText.clear()
+        synchronized(turnLock) {
+            turnReceivedAudio = false
+            droppingReply = false
+            lastAssistantTurnText.clear()
+            lastUserTurnText.clear()
+        }
         transcript.endTurn()
         _state.update {
             it.copy(
@@ -346,7 +354,7 @@ class VoiceSession private constructor(private val app: Application) : LiveClien
         endAfterReplyJob?.cancel()
         endAfterReplyJob = scope.launch {
             delay(300)
-            while (isActive && wanted && (speaker.isAudible(tailMs = 0) || _state.value.phase == Phase.Connecting || _state.value.phase == Phase.Processing)) {
+            while (isActive && wanted && (speaker.hasPendingOrActiveSpeech() || _state.value.phase == Phase.Connecting || _state.value.phase == Phase.Processing)) {
                 delay(100)
             }
             if (isActive && wanted) {
@@ -357,18 +365,20 @@ class VoiceSession private constructor(private val app: Application) : LiveClien
 
     /** Tap or voice barge-in while speaking: silence this reply immediately and return to clean listening. */
     fun interrupt(how: String = "tap") {
-        if (_state.value.phase != Phase.Speaking && _state.value.phase != Phase.Processing && !speaker.isAudible(tailMs = 0)) return
+        if (_state.value.phase != Phase.Speaking && _state.value.phase != Phase.Processing && !speaker.hasPendingOrActiveSpeech()) return
         Diag.i("reply: stopped by $how")
         replyWaitJob?.cancel()
         replyWaitJob = null
         endAfterReplyJob?.cancel()
         endAfterReplyJob = null
         wave.watch(false)
-        droppingReply = true
+        synchronized(turnLock) {
+            droppingReply = true
+            turnReceivedAudio = false
+            lastAssistantTurnText.clear()
+        }
         speaker.flush()
-        turnReceivedAudio = false
         clearRetainedReplyAudio()
-        lastAssistantTurnText.clear()
         AudioPlaybackState.onLocalTtsEnded()
         AudioPlaybackState.onLiveSpeakerState(active = false)
         lastActivity = SystemClock.elapsedRealtime()
@@ -405,30 +415,37 @@ class VoiceSession private constructor(private val app: Application) : LiveClien
         }
         _state.update { it.copy(phase = Phase.Connecting, problem = null) }
         connectAt = SystemClock.elapsedRealtime()
-        Diag.i("socket: connecting (try ${retries + 1}, resume=${resumeHandle != null}, model=${settings.model})")
-        val profileSummary = PersonalProfileResolver.assistantContextSummary(PersonalProfileStore(app).load())
-        val setup = LiveProtocol.Setup(
-            model = settings.model,
-            systemInstruction = Instructions.build(
-                settings.replyLanguage,
-                java.time.ZonedDateTime.now(),
-                if (settings.learning) Habits.get(app).summary(java.time.LocalTime.now().hour) else "",
-                profileSummary,
-                activeContext = ActiveTaskContext.promptSummary(),
-            ),
-            voice = settings.voice,
-            languages = settings.speechLanguages,
-            resumeHandle = resumeHandle,
-            tools = tools.declarations(),
-        )
-        client.connect(key, setup, this)
+        val retryNum = synchronized(turnLock) { retries + 1 }
+        Diag.i("socket: connecting (try $retryNum, resume=${resumeHandle != null}, model=${settings.model})")
+        connectJob?.cancel()
+        connectJob = scope.launch(Dispatchers.IO) {
+            val profileSummary = PersonalProfileResolver.assistantContextSummary(PersonalProfileStore(app).load())
+            val habitSummary = if (settings.learning) Habits.get(app).summary(java.time.LocalTime.now().hour) else ""
+            val activeContext = ActiveTaskContext.promptSummary()
+            val setup = LiveProtocol.Setup(
+                model = settings.model,
+                systemInstruction = Instructions.build(
+                    settings.replyLanguage,
+                    java.time.ZonedDateTime.now(),
+                    habitSummary,
+                    profileSummary,
+                    activeContext = activeContext,
+                ),
+                voice = settings.voice,
+                languages = settings.speechLanguages,
+                resumeHandle = resumeHandle,
+                tools = tools.declarations(),
+            )
+            if (!isActive || !wanted) return@launch
+            client.connect(key, setup, this@VoiceSession)
+        }
     }
 
     override fun onEvent(event: LiveEvent) {
         when (event) {
             LiveEvent.SetupComplete -> {
                 Diag.i("socket: ready in ${SystemClock.elapsedRealtime() - connectAt} ms")
-                retries = 0
+                synchronized(turnLock) { retries = 0 }
                 if (!mic.start()) {
                     stop("mic busy")
                     _state.update { it.copy(problem = "Another app is using the microphone.") }
@@ -443,11 +460,15 @@ class VoiceSession private constructor(private val app: Application) : LiveClien
             }
             is LiveEvent.Audio -> if (!droppingReply) {
                 FloatingOrb.activate(app)
-                turnReceivedAudio = true
-                if (!replyStarted) {
-                    replyStarted = true
-                    val wait = if (voiceAt > 0) "${SystemClock.elapsedRealtime() - voiceAt} ms after you stopped talking" else "with no voice heard"
-                    Diag.i("reply: first audio $wait")
+                val firstAudioWait = synchronized(turnLock) {
+                    turnReceivedAudio = true
+                    if (!replyStarted) {
+                        replyStarted = true
+                        if (voiceAt > 0) "${SystemClock.elapsedRealtime() - voiceAt} ms after you stopped talking" else "with no voice heard"
+                    } else null
+                }
+                if (firstAudioWait != null) {
+                    Diag.i("reply: first audio $firstAudioWait")
                 }
                 val amp = loudness(pcmLevel(event.pcm))
                 _level.value = amp
@@ -466,19 +487,25 @@ class VoiceSession private constructor(private val app: Application) : LiveClien
             is LiveEvent.UserText -> {
                 FloatingOrb.activate(app)
                 lastActivity = SystemClock.elapsedRealtime()
-                if (!heardUser) {
+                val firstHeard: Boolean
+                val accumulatedText: String
+                synchronized(turnLock) {
+                    firstHeard = !heardUser
+                    heardUser = true
+                    lastUserTurnText.append(' ').append(event.text)
+                    accumulatedText = lastUserTurnText.toString().trim()
+                }
+                if (firstHeard) {
                     Diag.i("user: speech heard")
                     TaskTracker.heard()
                 }
-                heardUser = true
-                lastUserTurnText.append(' ').append(event.text)
-                tools.userSpoke(lastUserTurnText.toString().trim())
+                tools.userSpoke(accumulatedText)
                 _state.update { it.copy(lines = transcript.add(fromUser = true, event.text)) }
             }
             is LiveEvent.AssistantText -> if (!droppingReply) {
                 FloatingOrb.activate(app)
                 lastActivity = SystemClock.elapsedRealtime()
-                lastAssistantTurnText.append(event.text)
+                synchronized(turnLock) { lastAssistantTurnText.append(event.text) }
                 _state.update { it.copy(lines = transcript.add(fromUser = false, event.text)) }
             }
             LiveEvent.Interrupted -> {
@@ -489,12 +516,14 @@ class VoiceSession private constructor(private val app: Application) : LiveClien
                 endAfterReplyJob?.cancel()
                 endAfterReplyJob = null
                 wave.watch(false)
-                droppingReply = false
-                replyStarted = false
-                turnReceivedAudio = false
+                synchronized(turnLock) {
+                    droppingReply = false
+                    replyStarted = false
+                    turnReceivedAudio = false
+                    lastAssistantTurnText.clear()
+                    lastUserTurnText.clear()
+                }
                 clearRetainedReplyAudio()
-                lastAssistantTurnText.clear()
-                lastUserTurnText.clear()
                 speaker.flush()
                 transcript.endTurn()
                 lastActivity = SystemClock.elapsedRealtime()
@@ -503,25 +532,32 @@ class VoiceSession private constructor(private val app: Application) : LiveClien
                 VoiceIndicator.onListening(0f)
             }
             LiveEvent.TurnComplete -> {
-                if (droppingReply) {
-                    droppingReply = false
-                    turnReceivedAudio = false
+                val (wasDropping, textToSpeak, receivedAudio) = synchronized(turnLock) {
+                    if (droppingReply) {
+                        droppingReply = false
+                        turnReceivedAudio = false
+                        lastAssistantTurnText.clear()
+                        Triple(true, "", false)
+                    } else {
+                        val txt = lastAssistantTurnText.toString()
+                        val rec = turnReceivedAudio
+                        turnReceivedAudio = false
+                        lastAssistantTurnText.clear()
+                        lastUserTurnText.clear()
+                        droppingReply = false
+                        Triple(false, txt, rec)
+                    }
+                }
+                if (wasDropping) {
                     clearRetainedReplyAudio()
-                    lastAssistantTurnText.clear()
                     return
                 }
                 replyWaitJob?.cancel()
                 replyWaitJob = null
                 speaker.endReply()
-                val textToSpeak = lastAssistantTurnText.toString()
-                val receivedAudio = turnReceivedAudio
-                turnReceivedAudio = false
                 val retainedAudio = takeRetainedReplyAudio()
                 val selectedLocalVoice = LiveResponseVoicePolicy.shouldUseSelectedVoice(settings.ttsVoiceId)
-                lastAssistantTurnText.clear()
-                lastUserTurnText.clear()
                 logTurnEnd()
-                droppingReply = false
                 transcript.endTurn()
 
                 // If Gemini Live stream sent text reply but no audio chunks (or audio dropped), fallback to local TTS!
@@ -542,7 +578,7 @@ class VoiceSession private constructor(private val app: Application) : LiveClien
                     ) {
                         replyWaitJob?.cancel()
                         replyWaitJob = scope.launch {
-                            while (isActive && wanted && speaker.isAudible(tailMs = 0)) delay(100)
+                            while (isActive && wanted && speaker.hasPendingOrActiveSpeech()) delay(100)
                             if (!isActive || !wanted) return@launch
                             wave.watch(false)
                             if (_state.value.phase == Phase.Speaking) {
@@ -561,7 +597,7 @@ class VoiceSession private constructor(private val app: Application) : LiveClien
                     speaker.endReply()
                     wave.watch(settings.waveToStop)
                     replyWaitJob = scope.launch {
-                        while (isActive && wanted && speaker.isAudible(tailMs = 0)) delay(100)
+                        while (isActive && wanted && speaker.hasPendingOrActiveSpeech()) delay(100)
                         if (!isActive || !wanted) return@launch
                         wave.watch(false)
                         if (_state.value.phase == Phase.Speaking) {
@@ -582,7 +618,7 @@ class VoiceSession private constructor(private val app: Application) : LiveClien
                         Diag.w("reply: selected local voice unavailable because the audio response had no transcription")
                     }
                     replyWaitJob = scope.launch {
-                        while (isActive && wanted && speaker.isAudible(tailMs = 0)) delay(100)
+                        while (isActive && wanted && speaker.hasPendingOrActiveSpeech()) delay(100)
                         if (!isActive || !wanted) return@launch
                         wave.watch(false)
                         if (_state.value.phase == Phase.Speaking) {
@@ -613,11 +649,13 @@ class VoiceSession private constructor(private val app: Application) : LiveClien
     override fun onClosed(problem: String?) {
         mic.stop()
         if (!wanted) return
-        if (retries < MAX_RETRIES) {
-            retries++
-            Diag.w("socket: lost, retry $retries of $MAX_RETRIES")
+        val nextRetry = synchronized(turnLock) {
+            if (retries < MAX_RETRIES) ++retries else -1
+        }
+        if (nextRetry > 0) {
+            Diag.w("socket: lost, retry $nextRetry of $MAX_RETRIES")
             scope.launch {
-                delay(1_000L * retries)
+                delay(1_000L * nextRetry)
                 if (wanted) connect()
             }
         } else {

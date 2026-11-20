@@ -14,4 +14,15 @@ internal object TtsPlaybackPolicy {
         callbackUtteranceId == activeUtteranceId &&
         callbackGeneration != null &&
         callbackGeneration == activeGeneration
+
+    fun hasPendingOrActiveSpeech(
+        isPlaying: Boolean,
+        hasPendingUtterance: Boolean,
+        hasActivePreview: Boolean,
+        replyOpen: Boolean,
+        audible: Boolean,
+    ): Boolean = isPlaying || hasPendingUtterance || hasActivePreview || replyOpen || audible
+
+    fun isMediaMutedOrZeroVolume(currentVolume: Int, isStreamMuted: Boolean): Boolean =
+        isStreamMuted || currentVolume <= 0
 }

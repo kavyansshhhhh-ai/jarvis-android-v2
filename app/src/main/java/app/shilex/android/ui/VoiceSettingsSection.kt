@@ -58,6 +58,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.shilex.android.Branding
 import app.shilex.android.assistant.AssistantViewModel
 import app.shilex.android.audio.BundledHindiVoices
+import app.shilex.android.audio.PreviewLanguage
 import app.shilex.android.audio.PreviewPlayback
 import app.shilex.android.audio.TtsVoiceInfo
 import app.shilex.android.audio.VoiceClassifier
@@ -82,12 +83,20 @@ fun JarvisVoiceSubScreen(
     val isReady by speaker.isTtsReadyState.collectAsStateWithLifecycle()
     val voiceError by speaker.ttsError.collectAsStateWithLifecycle()
     val previewPlayback by speaker.previewPlayback.collectAsStateWithLifecycle()
+    val isMediaMuted by speaker.isMediaMuted.collectAsStateWithLifecycle()
 
-    var speakResponses by remember { mutableStateOf(assistant.speakResponses) }
-    var rawSelectedVoiceId by remember { mutableStateOf(assistant.ttsVoiceId) }
-    var genderFilter by remember { mutableStateOf(assistant.ttsGenderFilter) }
-    var speechRate by remember { mutableFloatStateOf(assistant.ttsSpeechRate) }
-    var pitch by remember { mutableFloatStateOf(assistant.ttsPitch) }
+    val speakResponses by assistant.speakResponsesState.collectAsStateWithLifecycle()
+    val rawSelectedVoiceId by assistant.ttsVoiceIdState.collectAsStateWithLifecycle()
+    val genderFilter by assistant.ttsGenderFilterState.collectAsStateWithLifecycle()
+    val savedSpeechRate by assistant.ttsSpeechRateState.collectAsStateWithLifecycle()
+    val savedPitch by assistant.ttsPitchState.collectAsStateWithLifecycle()
+
+    var speechRate by remember { mutableFloatStateOf(savedSpeechRate) }
+    var pitch by remember { mutableFloatStateOf(savedPitch) }
+    var previewLanguage by rememberSaveable { mutableStateOf(PreviewLanguage.HINDI) }
+
+    LaunchedEffect(savedSpeechRate) { speechRate = savedSpeechRate }
+    LaunchedEffect(savedPitch) { pitch = savedPitch }
 
     val effectiveSelectedId = remember(rawSelectedVoiceId, hindiCatalog, genderFilter) {
         VoiceClassifier.resolveEffectiveVoiceId(
@@ -102,11 +111,6 @@ fun JarvisVoiceSubScreen(
 
     LifecycleResumeEffect(Unit) {
         assistant.refreshTtsVoices()
-        speakResponses = assistant.speakResponses
-        rawSelectedVoiceId = assistant.ttsVoiceId
-        genderFilter = assistant.ttsGenderFilter
-        speechRate = assistant.ttsSpeechRate
-        pitch = assistant.ttsPitch
         onPauseOrDispose {
             speaker.stopPreview()
         }
@@ -175,11 +179,82 @@ fun JarvisVoiceSubScreen(
                     fontWeight = FontWeight.Bold,
                 )
                 Text(
-                    text = "Choose your preferred Hindi voice for ${Branding.ASSISTANT_NAME}.",
+                    text = "Choose your preferred voice for ${Branding.ASSISTANT_NAME} and test Hindi or English previews.",
                     style = MaterialTheme.typography.bodySmall,
                     color = Muted,
                     modifier = Modifier.padding(top = 4.dp),
                 )
+            }
+        }
+
+        item(key = "preview_sample") {
+            GlassCard(verticalPadding = 12) {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                text = "Preview sample language",
+                                style = MaterialTheme.typography.titleMedium,
+                                color = PureWhite,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                            Text(
+                                text = VoiceClassifier.previewSampleText(previewLanguage),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Muted,
+                                modifier = Modifier.padding(top = 2.dp),
+                            )
+                        }
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        PreviewLanguage.entries.forEach { lang ->
+                            val selected = previewLanguage == lang
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(14.dp))
+                                    .background(if (selected) ElectricCyan.copy(alpha = 0.16f) else GlassSurfaceHighlight.copy(alpha = 0.7f))
+                                    .border(
+                                        0.9.dp,
+                                        if (selected) ElectricCyan.copy(alpha = 0.65f) else GlassBorderSubtle,
+                                        RoundedCornerShape(14.dp),
+                                    )
+                                    .clickable {
+                                        if (previewLanguage != lang) {
+                                            previewLanguage = lang
+                                            if (previewPlayback.state != VoicePreviewState.Idle) {
+                                                speaker.stopPreview()
+                                            }
+                                        }
+                                    }
+                                    .padding(vertical = 10.dp),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text(
+                                    text = lang.label,
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = if (selected) ElectricCyan else PureWhite,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if (isMediaMuted) {
+            item(key = "muted_notice") {
+                GlassCard(verticalPadding = 12) {
+                    Text(
+                        text = "Media volume is muted or set to zero. Turn up media volume on your device to hear voice previews.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = AmberWarning,
+                    )
+                }
             }
         }
 
@@ -218,12 +293,16 @@ fun JarvisVoiceSubScreen(
                     previewPlayback = previewPlayback,
                     onSelectVoice = { chosen ->
                         speaker.stopPreview()
-                        rawSelectedVoiceId = chosen.id
-                        genderFilter = Settings.GENDER_FEMALE
                         assistant.ttsGenderFilter = Settings.GENDER_FEMALE
                         assistant.ttsVoiceId = chosen.id
                     },
-                    onPreviewVoice = { id -> speaker.previewVoice(id) },
+                    onPreviewVoice = { id ->
+                        speaker.previewVoice(
+                            voiceId = id,
+                            language = previewLanguage,
+                            speechRateOverride = speechRate,
+                        )
+                    },
                     onStopPreview = { speaker.stopPreview() },
                 )
             }
@@ -244,12 +323,16 @@ fun JarvisVoiceSubScreen(
                     previewPlayback = previewPlayback,
                     onSelectVoice = { chosen ->
                         speaker.stopPreview()
-                        rawSelectedVoiceId = chosen.id
-                        genderFilter = Settings.GENDER_MALE
                         assistant.ttsGenderFilter = Settings.GENDER_MALE
                         assistant.ttsVoiceId = chosen.id
                     },
-                    onPreviewVoice = { id -> speaker.previewVoice(id) },
+                    onPreviewVoice = { id ->
+                        speaker.previewVoice(
+                            voiceId = id,
+                            language = previewLanguage,
+                            speechRateOverride = speechRate,
+                        )
+                    },
                     onStopPreview = { speaker.stopPreview() },
                 )
             }
@@ -262,10 +345,7 @@ fun JarvisVoiceSubScreen(
                     detail = "Speak ${Branding.ASSISTANT_NAME} answers aloud.",
                     checked = speakResponses,
                     icon = Icons.Filled.Star,
-                    onChange = { on ->
-                        speakResponses = on
-                        assistant.speakResponses = on
-                    },
+                    onChange = { on -> assistant.speakResponses = on },
                 )
                 GlassDivider()
                 VoiceControlSlider(
@@ -274,12 +354,8 @@ fun JarvisVoiceSubScreen(
                     value = speechRate,
                     valueRange = 0.5f..2.0f,
                     accent = ElectricCyan,
-                    onValueChange = { rate ->
-                        speechRate = rate
-                    },
-                    onValueChangeFinished = {
-                        assistant.ttsSpeechRate = speechRate
-                    },
+                    onValueChange = { rate -> speechRate = rate },
+                    onValueChangeFinished = { assistant.ttsSpeechRate = speechRate },
                 )
                 if (!selectedIsBundled) {
                     GlassDivider()
@@ -289,12 +365,8 @@ fun JarvisVoiceSubScreen(
                         value = pitch,
                         valueRange = 0.5f..1.5f,
                         accent = NeonViolet,
-                        onValueChange = { p ->
-                            pitch = p
-                        },
-                        onValueChangeFinished = {
-                            assistant.ttsPitch = pitch
-                        },
+                        onValueChange = { p -> pitch = p },
+                        onValueChangeFinished = { assistant.ttsPitch = pitch },
                     )
                 }
                 GlassDivider()
@@ -308,11 +380,6 @@ fun JarvisVoiceSubScreen(
                         onClick = {
                             speaker.stopPreview()
                             assistant.restoreDefaultTtsVoice()
-                            rawSelectedVoiceId = null
-                            genderFilter = Settings.GENDER_FEMALE
-                            assistant.ttsGenderFilter = Settings.GENDER_FEMALE
-                            speechRate = 1.0f
-                            pitch = 1.0f
                         },
                     ) {
                         Text("Reset voice", color = Muted, fontWeight = FontWeight.Medium)
@@ -387,7 +454,7 @@ private fun VoiceChoiceList(
                     when {
                         isPlaying -> {
                             Text(
-                                text = "Playing preview…",
+                                text = "Playing ${previewPlayback.language.label.lowercase(Locale.ROOT)} preview…",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = CoralError,
                                 modifier = Modifier.padding(top = 2.dp),
@@ -395,7 +462,7 @@ private fun VoiceChoiceList(
                         }
                         isLoading -> {
                             Text(
-                                text = "Preparing voice…",
+                                text = "Preparing ${previewPlayback.language.label.lowercase(Locale.ROOT)} voice…",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = ElectricCyan,
                                 modifier = Modifier.padding(top = 2.dp),

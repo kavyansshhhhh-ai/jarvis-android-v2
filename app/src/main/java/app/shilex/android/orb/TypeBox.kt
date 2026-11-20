@@ -99,7 +99,10 @@ object TypeBox {
         }
         runCatching { windows.addView(box.view, params) }
             .onSuccess { host = box }
-            .onFailure { Diag.w("orb: type box failed (${it.javaClass.simpleName})") }
+            .onFailure {
+                box.close()
+                Diag.w("orb: type box failed (${it.javaClass.simpleName})")
+            }
     }
 
     fun hide(context: Context) {

@@ -11,6 +11,7 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.compositionLocalOf
@@ -18,6 +19,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
@@ -191,7 +193,75 @@ private val Corners = Shapes(
     large = RoundedCornerShape(30.dp),
 )
 
+@Immutable
+private data class ShilexBrushes(
+    val glassBorderGradient: Brush,
+    val glassSurfaceGradient: Brush,
+    val glassDockSurfaceGradient: Brush,
+    val glassDockBorderGradient: Brush,
+    val glassAccentGradient: Brush,
+    val userChatBubbleGradient: Brush,
+    val liveStopButtonGradient: Brush,
+    val talkButtonGradient: Brush,
+    val buttonRimGradient: Brush,
+    val neutralRowIconBgGradient: Brush,
+    val neutralRowIconBorderGradient: Brush,
+)
+
+private fun buildBrushes(
+    colors: androidx.compose.material3.ColorScheme,
+    accent: Color,
+    violet: Color,
+    bubbleEndViolet: Color,
+    errorColor: Color,
+): ShilexBrushes = ShilexBrushes(
+    glassBorderGradient = Brush.verticalGradient(
+        listOf(
+            colors.outlineVariant.copy(alpha = 0.95f),
+            colors.outline.copy(alpha = 0.34f),
+            colors.outlineVariant.copy(alpha = 0.62f),
+        ),
+    ),
+    glassSurfaceGradient = Brush.verticalGradient(listOf(colors.surfaceVariant, colors.surface)),
+    glassDockSurfaceGradient = Brush.verticalGradient(listOf(colors.surfaceContainer, colors.surface)),
+    glassDockBorderGradient = Brush.verticalGradient(
+        listOf(
+            colors.outlineVariant,
+            accent.copy(alpha = 0.50f),
+            colors.outline.copy(alpha = 0.62f),
+        ),
+    ),
+    glassAccentGradient = Brush.horizontalGradient(listOf(accent, violet)),
+    userChatBubbleGradient = Brush.horizontalGradient(listOf(accent, bubbleEndViolet)),
+    liveStopButtonGradient = Brush.verticalGradient(listOf(errorColor, errorColor.copy(alpha = 0.78f))),
+    talkButtonGradient = Brush.verticalGradient(listOf(accent.copy(alpha = 0.88f), accent)),
+    buttonRimGradient = Brush.verticalGradient(
+        listOf(colors.onSurface.copy(alpha = 0.24f), colors.onSurface.copy(alpha = 0.08f)),
+    ),
+    neutralRowIconBgGradient = Brush.verticalGradient(listOf(colors.surfaceVariant, colors.surface)),
+    neutralRowIconBorderGradient = Brush.verticalGradient(
+        listOf(colors.outlineVariant, colors.outline.copy(alpha = 0.5f)),
+    ),
+)
+
+private val DarkShilexBrushes = buildBrushes(
+    colors = Dark,
+    accent = DarkCyan,
+    violet = DarkViolet,
+    bubbleEndViolet = Color(0xFF7C3AED),
+    errorColor = DarkError,
+)
+
+private val LightShilexBrushes = buildBrushes(
+    colors = Light,
+    accent = LightCyan,
+    violet = LightViolet,
+    bubbleEndViolet = LightViolet,
+    errorColor = LightError,
+)
+
 private val LocalAppearanceMode = compositionLocalOf { AppearanceMode.Dark }
+private val LocalShilexBrushes = staticCompositionLocalOf { DarkShilexBrushes }
 
 /** JARVIS Liquid Glass theme with persistent dark, light, and live system modes. */
 @Composable
@@ -208,7 +278,7 @@ fun ShilexTheme(content: @Composable () -> Unit) {
         preferences.registerOnSharedPreferenceChangeListener(listener)
         onDispose { preferences.unregisterOnSharedPreferenceChangeListener(listener) }
     }
-    val systemDark = androidx.compose.foundation.isSystemInDarkTheme()
+    val systemDark = isSystemInDarkTheme()
     val dark = when (savedMode) {
         AppearanceMode.Dark -> true
         AppearanceMode.Light -> false
@@ -224,7 +294,10 @@ fun ShilexTheme(content: @Composable () -> Unit) {
             }
         }
     }
-    CompositionLocalProvider(LocalAppearanceMode provides savedMode) {
+    CompositionLocalProvider(
+        LocalAppearanceMode provides savedMode,
+        LocalShilexBrushes provides if (dark) DarkShilexBrushes else LightShilexBrushes,
+    ) {
         MaterialTheme(
             colorScheme = if (dark) Dark else Light,
             typography = Type,
@@ -246,53 +319,15 @@ val Surface: Color @Composable @ReadOnlyComposable get() = MaterialTheme.colorSc
 val Muted: Color @Composable @ReadOnlyComposable get() = MaterialTheme.colorScheme.onSurfaceVariant
 val Warning: Color @Composable @ReadOnlyComposable get() = MaterialTheme.colorScheme.tertiary
 
-// Smoked Frosted Liquid Glass Brushes (cached once to eliminate per-frame allocations)
-val GlassBorderGradient: Brush @Composable @ReadOnlyComposable get() = Brush.verticalGradient(
-    listOf(
-        MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.95f),
-        MaterialTheme.colorScheme.outline.copy(alpha = 0.34f),
-        MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.62f),
-    ),
-)
-
-val GlassSurfaceGradient: Brush @Composable @ReadOnlyComposable get() = Brush.verticalGradient(
-    listOf(MaterialTheme.colorScheme.surfaceVariant, MaterialTheme.colorScheme.surface),
-)
-
-val GlassDockSurfaceGradient: Brush @Composable @ReadOnlyComposable get() = Brush.verticalGradient(
-    listOf(MaterialTheme.colorScheme.surfaceContainer, MaterialTheme.colorScheme.surface),
-)
-
-val GlassDockBorderGradient: Brush @Composable @ReadOnlyComposable get() = Brush.verticalGradient(
-    listOf(
-        MaterialTheme.colorScheme.outlineVariant,
-        ElectricCyan.copy(alpha = 0.50f),
-        MaterialTheme.colorScheme.outline.copy(alpha = 0.62f),
-    ),
-)
-
-val GlassAccentGradient: Brush @Composable @ReadOnlyComposable get() = Brush.horizontalGradient(listOf(ElectricCyan, NeonViolet))
-
-val UserChatBubbleGradient: Brush @Composable @ReadOnlyComposable get() = Brush.horizontalGradient(
-    listOf(ElectricCyan, if (MaterialTheme.colorScheme.background == DarkBackground) Color(0xFF7C3AED) else LightViolet),
-)
-
-val LiveStopButtonGradient: Brush @Composable @ReadOnlyComposable get() = Brush.verticalGradient(
-    listOf(CoralError, CoralError.copy(alpha = 0.78f)),
-)
-
-val TalkButtonGradient: Brush @Composable @ReadOnlyComposable get() = Brush.verticalGradient(
-    listOf(ElectricCyan.copy(alpha = 0.88f), ElectricCyan),
-)
-
-val ButtonRimGradient: Brush @Composable @ReadOnlyComposable get() = Brush.verticalGradient(
-    listOf(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.24f), MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)),
-)
-
-val NeutralRowIconBgGradient: Brush @Composable @ReadOnlyComposable get() = Brush.verticalGradient(
-    listOf(MaterialTheme.colorScheme.surfaceVariant, MaterialTheme.colorScheme.surface),
-)
-
-val NeutralRowIconBorderGradient: Brush @Composable @ReadOnlyComposable get() = Brush.verticalGradient(
-    listOf(MaterialTheme.colorScheme.outlineVariant, MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)),
-)
+// Smoked Frosted Liquid Glass Brushes (cached once per theme to eliminate per-frame allocations)
+val GlassBorderGradient: Brush @Composable @ReadOnlyComposable get() = LocalShilexBrushes.current.glassBorderGradient
+val GlassSurfaceGradient: Brush @Composable @ReadOnlyComposable get() = LocalShilexBrushes.current.glassSurfaceGradient
+val GlassDockSurfaceGradient: Brush @Composable @ReadOnlyComposable get() = LocalShilexBrushes.current.glassDockSurfaceGradient
+val GlassDockBorderGradient: Brush @Composable @ReadOnlyComposable get() = LocalShilexBrushes.current.glassDockBorderGradient
+val GlassAccentGradient: Brush @Composable @ReadOnlyComposable get() = LocalShilexBrushes.current.glassAccentGradient
+val UserChatBubbleGradient: Brush @Composable @ReadOnlyComposable get() = LocalShilexBrushes.current.userChatBubbleGradient
+val LiveStopButtonGradient: Brush @Composable @ReadOnlyComposable get() = LocalShilexBrushes.current.liveStopButtonGradient
+val TalkButtonGradient: Brush @Composable @ReadOnlyComposable get() = LocalShilexBrushes.current.talkButtonGradient
+val ButtonRimGradient: Brush @Composable @ReadOnlyComposable get() = LocalShilexBrushes.current.buttonRimGradient
+val NeutralRowIconBgGradient: Brush @Composable @ReadOnlyComposable get() = LocalShilexBrushes.current.neutralRowIconBgGradient
+val NeutralRowIconBorderGradient: Brush @Composable @ReadOnlyComposable get() = LocalShilexBrushes.current.neutralRowIconBorderGradient

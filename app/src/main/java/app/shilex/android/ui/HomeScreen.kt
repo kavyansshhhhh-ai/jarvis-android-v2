@@ -129,11 +129,12 @@ fun HomeScreen(
     var inputText by rememberSaveable { mutableStateOf("") }
     var isListeningSpeech by remember { mutableStateOf(false) }
 
-    val speechRecognizer = remember {
-        runCatching { SpeechRecognizer.createSpeechRecognizer(context) }.getOrNull()
-    }
-    DisposableEffect(speechRecognizer) {
-        onDispose { speechRecognizer?.destroy() }
+    var speechRecognizer by remember { mutableStateOf<SpeechRecognizer?>(null) }
+    DisposableEffect(Unit) {
+        onDispose {
+            speechRecognizer?.destroy()
+            speechRecognizer = null
+        }
     }
 
     val askMic = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
@@ -163,16 +164,19 @@ fun HomeScreen(
             askMic.launch(Manifest.permission.RECORD_AUDIO)
         } else {
             runCatching {
+                val recognizer = speechRecognizer ?: runCatching {
+                    SpeechRecognizer.createSpeechRecognizer(context)
+                }.getOrNull()?.also { speechRecognizer = it }
                 if (isListeningSpeech) {
-                    speechRecognizer?.stopListening()
+                    recognizer?.stopListening()
                     isListeningSpeech = false
-                } else {
+                } else if (recognizer != null) {
                     val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
                         putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
                         putExtra(RecognizerIntent.EXTRA_LANGUAGE, "hi-IN")
                         putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
                     }
-                    speechRecognizer?.setRecognitionListener(object : RecognitionListener {
+                    recognizer.setRecognitionListener(object : RecognitionListener {
                         override fun onReadyForSpeech(params: Bundle?) { isListeningSpeech = true }
                         override fun onBeginningOfSpeech() {}
                         override fun onRmsChanged(rmsdB: Float) {}
@@ -194,7 +198,7 @@ fun HomeScreen(
                         }
                         override fun onEvent(eventType: Int, params: Bundle?) {}
                     })
-                    speechRecognizer?.startListening(intent)
+                    recognizer.startListening(intent)
                     isListeningSpeech = true
                 }
             }
@@ -204,7 +208,9 @@ fun HomeScreen(
     val now = status(state, localPhase, wakeOn)
     val problem = state.problem != null && !now.live
     val inConversation = state.phase != Phase.Off || state.lines.isNotEmpty()
-    val recentTask = task?.takeIf { now.live || System.currentTimeMillis() - it.at < TASK_SHOWN_MS }
+    val recentTask = remember(task, now.live) {
+        task?.takeIf { now.live || System.currentTimeMillis() - it.at < TASK_SHOWN_MS }
+    }
 
     Column(
         Modifier

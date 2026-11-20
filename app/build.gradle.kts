@@ -41,6 +41,11 @@ android {
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             if (releaseKeystore != null) signingConfig = signingConfigs.getByName("release")
         }
+        create("v2") {
+            initWith(getByName("debug"))
+            applicationIdSuffix = ".v2"
+            matchingFallbacks += listOf("debug")
+        }
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -184,3 +189,26 @@ val fetchOfflineHindiTts by tasks.registering {
 android.sourceSets["main"].assets.srcDir(voskAssets)
 android.sourceSets["main"].assets.srcDir(ttsAssets)
 tasks.named("preBuild") { dependsOn(fetchVoskModel, fetchOfflineHindiTts) }
+
+androidComponents {
+    onVariants(selector().withBuildType("v2")) { variant ->
+        variant.outputs.forEach { output ->
+            output.versionCode.set(2)
+            output.versionName.set("2.0.0")
+        }
+    }
+}
+
+tasks.matching { it.name == "assembleV2" }.configureEach {
+    doLast {
+        val v2OutDir = layout.buildDirectory.dir("outputs/apk/v2").get().asFile
+        val sourceApk = v2OutDir.resolve("app-v2.apk").takeIf { it.exists() }
+            ?: v2OutDir.listFiles { f -> f.isFile && f.extension == "apk" && f.name != "JARVIS-V2-STABILITY-2.0.0.apk" }
+                ?.firstOrNull()
+            ?: throw GradleException("Expected built V2 APK in ${v2OutDir.absolutePath}")
+        val targetApk = v2OutDir.resolve("JARVIS-V2-STABILITY-2.0.0.apk")
+        sourceApk.copyTo(targetApk, overwrite = true)
+        logger.lifecycle("Version 2 APK emitted: ${targetApk.absolutePath} (${targetApk.length()} bytes)")
+    }
+}
+

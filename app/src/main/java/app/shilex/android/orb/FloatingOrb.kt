@@ -75,6 +75,9 @@ object FloatingOrb {
 
     fun allowed(context: Context) = AndroidSettings.canDrawOverlays(context)
 
+    /** Fast lock-free check used by Accessibility events to skip work while the orb is inactive. */
+    fun isPotentiallyActive(): Boolean = assistantEventActive || host != null || overlayVisibility.value
+
     /** Permission and the setting enable the capability; a live assistant event is also required. */
     fun sync(context: Context) {
         val app = context.applicationContext
@@ -136,18 +139,21 @@ object FloatingOrb {
     }
 
     private fun shouldShowNow(app: Context): Boolean {
-        val control = ControlService.instance
+        if (!assistantEventActive || appVisible) return false
+        if (!Settings(app).floatingOrb || !allowed(app)) return false
         val screenAwakeAndUnlocked =
             app.getSystemService(PowerManager::class.java)?.isInteractive == true &&
                 app.getSystemService(KeyguardManager::class.java)?.isKeyguardLocked != true
-        val sensitiveScreen = !screenAwakeAndUnlocked || control != null && (
+        if (!screenAwakeAndUnlocked) return false
+        val control = ControlService.instance
+        val sensitiveScreen = control != null && (
             control.isSensitiveAuthActive() ||
                 control.foregroundPackage().let { it.isNotEmpty() && ControlRules.isSensitiveOrBlockedPackage(it) }
             )
         return TemporaryOrbPolicy.shouldShow(
             assistantEventActive = assistantEventActive,
-            enabled = Settings(app).floatingOrb,
-            hasOverlayPermission = allowed(app),
+            enabled = true,
+            hasOverlayPermission = true,
             appVisible = appVisible,
             sensitiveScreen = sensitiveScreen,
         )
@@ -223,6 +229,7 @@ object FloatingOrb {
             }
             .onFailure {
                 overlayVisibility.value = false
+                orb.close()
                 Diag.w("orb: couldn't show (${it.javaClass.simpleName})")
             }
     }

@@ -119,6 +119,14 @@ class VoiceClassifierTest {
 
         val hiSample = VoiceClassifier.sampleTextForLocale(Locale("hi", "IN"))
         assertEquals("नमस्ते! मैं आपकी कैसे मदद कर सकता हूँ?", hiSample)
+        assertEquals(
+            VoiceClassifier.HINDI_PREVIEW_SAMPLE,
+            VoiceClassifier.previewSampleText(PreviewLanguage.HINDI),
+        )
+        assertEquals(
+            VoiceClassifier.ENGLISH_PREVIEW_SAMPLE,
+            VoiceClassifier.previewSampleText(PreviewLanguage.ENGLISH),
+        )
     }
 
     @Test

@@ -457,11 +457,13 @@ private fun SettingsMainContent(
         // Dedicated JARVIS VOICE Folder (opens clean Female Voices / Male Voices folder)
         item(key = "jarvis_voice") {
             val hindiCatalog by assistant.speaker.hindiCatalog.collectAsStateWithLifecycle()
-            val effectiveVoiceId = remember(assistant.ttsVoiceId, hindiCatalog, assistant.ttsGenderFilter) {
+            val savedVoiceId by assistant.ttsVoiceIdState.collectAsStateWithLifecycle()
+            val savedGenderFilter by assistant.ttsGenderFilterState.collectAsStateWithLifecycle()
+            val effectiveVoiceId = remember(savedVoiceId, hindiCatalog, savedGenderFilter) {
                 VoiceClassifier.resolveEffectiveVoiceId(
-                    savedVoiceId = assistant.ttsVoiceId,
+                    savedVoiceId = savedVoiceId,
                     catalog = hindiCatalog,
-                    preferMale = assistant.ttsGenderFilter == AppSettings.GENDER_MALE,
+                    preferMale = savedGenderFilter == AppSettings.GENDER_MALE,
                 )
             }
             val activeVoiceName = remember(effectiveVoiceId, hindiCatalog) {

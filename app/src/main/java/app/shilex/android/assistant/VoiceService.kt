@@ -50,6 +50,8 @@ class VoiceService : Service() {
     private var foreground = false
     private var wakeLock: PowerManager.WakeLock? = null
     private var lastWakeAt = 0L
+    private var activeTone: ToneGenerator? = null
+    private var channelsCreated = false
 
     // Voice setup records with its own mic; the wake listener waits meanwhile.
     @Volatile private var setupActive = false
@@ -91,6 +93,8 @@ class VoiceService : Service() {
 
     override fun onDestroy() {
         main.removeCallbacksAndMessages(RESUME_WAKE_TOKEN)
+        main.removeCallbacksAndMessages(TONE_TOKEN)
+        releaseToneGenerator()
         wake.stop()
         WakeActivationOverlay.dismiss(this)
         releaseWakeLock()
@@ -209,9 +213,36 @@ class VoiceService : Service() {
         ) {
             WakeActivationOverlay.showBriefly(this)
         }
-        runCatching { ToneGenerator(AudioManager.STREAM_SYSTEM, 70).startTone(ToneGenerator.TONE_PROP_BEEP, 130) }
+        playWakeTone()
         if (Settings(this).localCommands && LocalTurn.get(this).start()) return
         VoiceSession.get(this).start()
+    }
+
+    private fun playWakeTone() {
+        main.removeCallbacksAndMessages(TONE_TOKEN)
+        releaseToneGenerator()
+        runCatching {
+            val tone = ToneGenerator(AudioManager.STREAM_SYSTEM, 70)
+            activeTone = tone
+            tone.startTone(ToneGenerator.TONE_PROP_BEEP, WAKE_TONE_DURATION_MS)
+            main.postDelayed(
+                {
+                    if (activeTone === tone) activeTone = null
+                    runCatching { tone.release() }
+                },
+                TONE_TOKEN,
+                WAKE_TONE_RELEASE_DELAY_MS,
+            )
+        }.onFailure {
+            releaseToneGenerator()
+        }
+    }
+
+    private fun releaseToneGenerator() {
+        val tone = activeTone ?: return
+        activeTone = null
+        runCatching { tone.stopTone() }
+        runCatching { tone.release() }
     }
 
     private fun acquireHandoverWakeLock() {
@@ -256,19 +287,22 @@ class VoiceService : Service() {
         .build()
 
     private fun builder(channel: String): NotificationCompat.Builder {
-        val manager = getSystemService(NotificationManager::class.java)
-        manager.createNotificationChannel(
-            NotificationChannel(CHANNEL, "Listening", NotificationManager.IMPORTANCE_LOW).apply {
-                description = "Shown while ${Branding.ASSISTANT_NAME} can hear you."
-            },
-        )
-        manager.createNotificationChannel(
-            NotificationChannel(STANDBY_CHANNEL, "Wake Word Standby", NotificationManager.IMPORTANCE_LOW).apply {
-                description = "Shown while ${Branding.ASSISTANT_NAME} listens locally for the wake word."
-                setSound(null, null)
-                enableVibration(false)
-            },
-        )
+        if (!channelsCreated) {
+            val manager = getSystemService(NotificationManager::class.java)
+            manager.createNotificationChannel(
+                NotificationChannel(CHANNEL, "Listening", NotificationManager.IMPORTANCE_LOW).apply {
+                    description = "Shown while ${Branding.ASSISTANT_NAME} can hear you."
+                },
+            )
+            manager.createNotificationChannel(
+                NotificationChannel(STANDBY_CHANNEL, "Wake Word Standby", NotificationManager.IMPORTANCE_LOW).apply {
+                    description = "Shown while ${Branding.ASSISTANT_NAME} listens locally for the wake word."
+                    setSound(null, null)
+                    enableVibration(false)
+                },
+            )
+            channelsCreated = true
+        }
         val open = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
         return NotificationCompat.Builder(this, channel)
             .setSmallIcon(R.drawable.ic_notification)
@@ -290,7 +324,10 @@ class VoiceService : Service() {
         private const val ACTION_WAKE_OFF = "app.shilex.android.WAKE_OFF"
         private const val ACTION_SHUTDOWN = "app.shilex.android.SHUTDOWN"
         private const val MIC_HANDOVER_MS = 280L
+        private const val WAKE_TONE_DURATION_MS = 130
+        private const val WAKE_TONE_RELEASE_DELAY_MS = 260L
         private val RESUME_WAKE_TOKEN = Any()
+        private val TONE_TOKEN = Any()
 
         @Volatile private var instance: VoiceService? = null
 

@@ -52,6 +52,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -239,36 +240,39 @@ private fun Content(
             .background(OledBlack),
     ) {
         val safeTab = tab.coerceIn(0, Tab.entries.lastIndex)
+        val saveableStateHolder = rememberSaveableStateHolder()
 
-        // Full-bleed scrollable content with short GPU-composited crossfade to prevent tab-switch flicker
+        // Full-bleed scrollable content with short GPU-composited crossfade and preserved tab state
         Crossfade(
             targetState = safeTab,
             animationSpec = tween(durationMillis = 100),
             modifier = Modifier.fillMaxSize(),
             label = "tabCrossfade",
         ) { activeTabIndex ->
-            when (Tab.entries[activeTabIndex]) {
-                Tab.Home -> HomeScreen(
-                    state = state,
-                    localPhase = localPhase,
-                    level = level,
-                    task = task,
-                    activity = activity,
-                    wakeOn = assistant.wakeWordAvailable && wakeWord && VoiceService.hasMicPermission(context),
-                    onStart = assistant::start,
-                    onStop = assistant::stop,
-                    onInterrupt = assistant::interrupt,
-                    onMicDenied = assistant::micUnavailable,
-                    onPermissionAnswered = assistant::permissionAnswered,
-                    onQuick = assistant::quick,
-                    onSeeActivity = { setTab(Tab.Activity.ordinal) },
-                    favourites = remember(activity.size) { assistant.favourites() },
-                    voiceIndicator = voiceIndicator,
-                    onSendText = assistant::sendTextMessage,
-                )
-                Tab.Automations -> AutomationsScreen()
-                Tab.Activity -> ActivityScreen(activity, assistant::clearActivity)
-                Tab.Settings -> SettingsScreen(assistant)
+            saveableStateHolder.SaveableStateProvider(activeTabIndex) {
+                when (Tab.entries[activeTabIndex]) {
+                    Tab.Home -> HomeScreen(
+                        state = state,
+                        localPhase = localPhase,
+                        level = level,
+                        task = task,
+                        activity = activity,
+                        wakeOn = assistant.wakeWordAvailable && wakeWord && VoiceService.hasMicPermission(context),
+                        onStart = assistant::start,
+                        onStop = assistant::stop,
+                        onInterrupt = assistant::interrupt,
+                        onMicDenied = assistant::micUnavailable,
+                        onPermissionAnswered = assistant::permissionAnswered,
+                        onQuick = assistant::quick,
+                        onSeeActivity = { setTab(Tab.Activity.ordinal) },
+                        favourites = remember(activity.size) { assistant.favourites() },
+                        voiceIndicator = voiceIndicator,
+                        onSendText = assistant::sendTextMessage,
+                    )
+                    Tab.Automations -> AutomationsScreen()
+                    Tab.Activity -> ActivityScreen(activity, assistant::clearActivity)
+                    Tab.Settings -> SettingsScreen(assistant)
+                }
             }
         }
 

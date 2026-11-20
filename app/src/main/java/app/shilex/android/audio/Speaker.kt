@@ -23,6 +23,7 @@ import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
 
 /** Explicit preview states distinguishing loading model weights vs active audio playback. */
@@ -35,6 +36,7 @@ enum class VoicePreviewState {
 data class PreviewPlayback(
     val voiceId: String? = null,
     val state: VoicePreviewState = VoicePreviewState.Idle,
+    val language: PreviewLanguage = PreviewLanguage.HINDI,
 )
 
 /**
@@ -76,6 +78,7 @@ class Speaker(private val context: Context? = null) {
 
     private val offlineHindiEngine: OfflineHindiTtsEngine? = appContext?.let { OfflineHindiTtsEngine(it) }
     private val offlineTtsExecutor = Executors.newSingleThreadExecutor { Thread(it, "offline-tts") }
+    private val pendingOfflineUtterances = AtomicInteger(0)
 
     private val _availableVoices = MutableStateFlow<List<TtsVoiceInfo>>(emptyList())
     val availableVoices: StateFlow<List<TtsVoiceInfo>> = _availableVoices.asStateFlow()
@@ -103,6 +106,9 @@ class Speaker(private val context: Context? = null) {
 
     private val _previewingVoiceId = MutableStateFlow<String?>(null)
     val previewingVoiceId: StateFlow<String?> = _previewingVoiceId.asStateFlow()
+
+    private val _isMediaMuted = MutableStateFlow(false)
+    val isMediaMuted: StateFlow<Boolean> = _isMediaMuted.asStateFlow()
 
     private data class QueuedUtterance(
         val generation: Long,
@@ -138,6 +144,7 @@ class Speaker(private val context: Context? = null) {
 
     init {
         if (appContext != null) {
+            refreshAudioOutputState()
             discoverVoices()
             initTts()
         }
@@ -146,6 +153,16 @@ class Speaker(private val context: Context? = null) {
     // ==========================================
     // 1. TextToSpeech Engine Lifecycle & Control
     // ==========================================
+
+    fun refreshAudioOutputState(): Boolean {
+        val ctx = appContext ?: return false
+        val am = ctx.getSystemService(Context.AUDIO_SERVICE) as? AudioManager ?: return false
+        val volume = runCatching { am.getStreamVolume(AudioManager.STREAM_MUSIC) }.getOrDefault(1)
+        val muted = runCatching { am.isStreamMute(AudioManager.STREAM_MUSIC) }.getOrDefault(false)
+        val zeroOrMuted = TtsPlaybackPolicy.isMediaMutedOrZeroVolume(volume, muted)
+        _isMediaMuted.value = zeroOrMuted
+        return zeroOrMuted
+    }
 
     fun isTtsReady(): Boolean = ttsReady || BundledHindiVoices.availableForRuntime(appContext).isNotEmpty()
 
@@ -256,7 +273,11 @@ class Speaker(private val context: Context? = null) {
                             _speechAmplitude.value = 0.45f
                             if (utteranceId?.startsWith("preview_") == true) {
                                 _previewingVoiceId.value?.let { previewId ->
-                                    _previewPlayback.value = PreviewPlayback(previewId, VoicePreviewState.Playing)
+                                    _previewPlayback.value = PreviewPlayback(
+                                        voiceId = previewId,
+                                        state = VoicePreviewState.Playing,
+                                        language = _previewPlayback.value.language,
+                                    )
                                 }
                             }
                             true
@@ -342,6 +363,9 @@ class Speaker(private val context: Context? = null) {
         if (finishState != null) {
             Diag.i("tts: playback ${if (completedNaturally) "completed" else "interrupted"} for utterance $utteranceId")
             AudioPlaybackState.onLocalTtsEnded()
+            if (!replyOpen && !hasPendingOrActiveSpeech()) {
+                writer.execute { resetTrackSafely() }
+            }
             abandonAudioFocus()
         }
     }
@@ -520,6 +544,7 @@ class Speaker(private val context: Context? = null) {
         if (queueMode == TextToSpeech.QUEUE_FLUSH) {
             interruptActiveAudioForNewSpeech()
         }
+        refreshAudioOutputState()
         // Resolve and strictly validate saved voice so all speech outputs use the exact selected voice.
         val effectiveVoiceId = VoiceClassifier.resolveEffectiveVoiceId(
             savedVoiceId = settings?.ttsVoiceId,
@@ -621,20 +646,25 @@ class Speaker(private val context: Context? = null) {
     }
 
     /**
-     * Speaks a short natural Hindi preview sentence in the target voice profile without changing
-     * the permanent selected assistant voice setting. Cancels any active preview immediately.
+     * Speaks a short natural Hindi or English preview sentence in the target voice profile without
+     * changing the permanent selected assistant voice setting. Cancels any active preview immediately.
      */
     fun previewVoice(
         voiceId: String,
         sampleText: String? = null,
+        language: PreviewLanguage = PreviewLanguage.HINDI,
+        speechRateOverride: Float? = null,
         onComplete: (() -> Unit)? = null,
     ) {
         // Preview owns the shared output path while active. Flush assistant speech, queued
         // utterances and any previous preview before loading the requested identity.
         flush()
+        refreshAudioOutputState()
 
         val previewSentence = sampleText?.ifBlank { null }
-            ?: "नमस्ते! मैं आपकी कैसे मदद कर सकता हूँ?"
+            ?: VoiceClassifier.previewSampleText(language)
+        val effectiveRate = (speechRateOverride ?: appContext?.let { Settings(it).ttsSpeechRate } ?: 1.0f)
+            .coerceIn(0.5f, 2.0f)
 
         val bundledVoice = BundledHindiVoices.find(voiceId)
         val offlineEngine = offlineHindiEngine
@@ -658,21 +688,21 @@ class Speaker(private val context: Context? = null) {
                 utteranceCallbacks[utteranceId] = UtteranceEntry(g, onComplete, onComplete)
                 _ttsError.value = null
                 activeUtteranceId = utteranceId
-                _previewPlayback.value = PreviewPlayback(voiceId, VoicePreviewState.Loading)
+                _previewPlayback.value = PreviewPlayback(voiceId, VoicePreviewState.Loading, language)
                 _previewingVoiceId.value = voiceId
                 _isSpeaking.value = false
                 _speechAmplitude.value = 0f
                 g
             }
 
-            val rate = appContext?.let { Settings(it).ttsSpeechRate } ?: 1.0f
             speakBundledOffline(
                 voice = bundledVoice,
                 text = previewSentence,
-                speed = rate,
+                speed = effectiveRate,
                 utteranceId = utteranceId,
                 gen = gen,
                 isPreview = true,
+                previewLanguage = language,
             )
             return
         }
@@ -685,7 +715,7 @@ class Speaker(private val context: Context? = null) {
                 utteranceCallbacks[pendingId] = UtteranceEntry(g, onComplete, onComplete)
                 _ttsError.value = null
                 activeUtteranceId = pendingId
-                _previewPlayback.value = PreviewPlayback(voiceId, VoicePreviewState.Loading)
+                _previewPlayback.value = PreviewPlayback(voiceId, VoicePreviewState.Loading, language)
                 _previewingVoiceId.value = voiceId
                 _isSpeaking.value = false
                 _speechAmplitude.value = 0f
@@ -698,7 +728,7 @@ class Speaker(private val context: Context? = null) {
                     return@initTts
                 }
                 if (ok) {
-                    startSystemVoicePreview(voiceId, previewSentence, pendingId, requestGen)
+                    startSystemVoicePreview(voiceId, previewSentence, pendingId, requestGen, effectiveRate)
                 } else {
                     synchronized(ttsStateLock) {
                         if (activeUtteranceId == pendingId) {
@@ -723,13 +753,13 @@ class Speaker(private val context: Context? = null) {
             utteranceCallbacks[utteranceId] = UtteranceEntry(g, onComplete, onComplete)
             _ttsError.value = null
             activeUtteranceId = utteranceId
-            _previewPlayback.value = PreviewPlayback(voiceId, VoicePreviewState.Loading)
+            _previewPlayback.value = PreviewPlayback(voiceId, VoicePreviewState.Loading, language)
             _previewingVoiceId.value = voiceId
             _isSpeaking.value = false
             _speechAmplitude.value = 0f
             g
         }
-        startSystemVoicePreview(voiceId, previewSentence, utteranceId, gen)
+        startSystemVoicePreview(voiceId, previewSentence, utteranceId, gen, effectiveRate)
     }
 
     private fun startSystemVoicePreview(
@@ -737,6 +767,7 @@ class Speaker(private val context: Context? = null) {
         sampleText: String?,
         utteranceId: String,
         expectedGen: Long,
+        speechRate: Float,
     ) {
         val engine = tts
         val stillCurrent = synchronized(ttsStateLock) { expectedGen == ttsGeneration }
@@ -795,11 +826,8 @@ class Speaker(private val context: Context? = null) {
         }
         val textToSpeak = sampleText ?: VoiceClassifier.sampleTextForLocale(previewLocale)
 
-        appContext?.let { ctx ->
-            val settings = Settings(ctx)
-            runCatching { engine.setSpeechRate(settings.ttsSpeechRate) }
-            runCatching { engine.setPitch(1.0f) }
-        }
+        runCatching { engine.setSpeechRate(speechRate) }
+        runCatching { engine.setPitch(1.0f) }
         if (runCatching { engine.voice = targetVoice }.isFailure) {
             synchronized(ttsStateLock) {
                 if (activeUtteranceId == utteranceId) {
@@ -822,7 +850,7 @@ class Speaker(private val context: Context? = null) {
             } else {
                 _ttsError.value = null
                 activeUtteranceId = utteranceId
-                _previewPlayback.value = PreviewPlayback(voiceId, VoicePreviewState.Loading)
+                _previewPlayback.value = _previewPlayback.value.copy(voiceId = voiceId, state = VoicePreviewState.Loading)
                 _previewingVoiceId.value = voiceId
                 _isSpeaking.value = false
                 _speechAmplitude.value = 0f
@@ -867,12 +895,14 @@ class Speaker(private val context: Context? = null) {
         utteranceId: String,
         gen: Long,
         isPreview: Boolean,
+        previewLanguage: PreviewLanguage = PreviewLanguage.HINDI,
     ) {
         val offlineEngine = offlineHindiEngine ?: run {
             _ttsError.value = "Offline voice engine is unavailable."
             handleUtteranceFinished(utteranceId, completedNaturally = false)
             return
         }
+        pendingOfflineUtterances.incrementAndGet()
         offlineTtsExecutor.execute {
             try {
                 val activeValid = synchronized(ttsStateLock) {
@@ -882,7 +912,7 @@ class Speaker(private val context: Context? = null) {
                         _ttsError.value = null
                         activeUtteranceId = utteranceId
                         if (isPreview) {
-                            _previewPlayback.value = PreviewPlayback(voice.id, VoicePreviewState.Loading)
+                            _previewPlayback.value = PreviewPlayback(voice.id, VoicePreviewState.Loading, previewLanguage)
                             _previewingVoiceId.value = voice.id
                         }
                         true
@@ -939,7 +969,7 @@ class Speaker(private val context: Context? = null) {
                                         val currentPlayback = synchronized(ttsStateLock) {
                                             if (gen == ttsGeneration && activeUtteranceId == utteranceId) {
                                                 if (isPreview) {
-                                                    _previewPlayback.value = PreviewPlayback(voice.id, VoicePreviewState.Playing)
+                                                    _previewPlayback.value = PreviewPlayback(voice.id, VoicePreviewState.Playing, previewLanguage)
                                                     _previewingVoiceId.value = voice.id
                                                 }
                                                 _isSpeaking.value = true
@@ -1047,6 +1077,8 @@ class Speaker(private val context: Context? = null) {
                     }
                 }
                 handleUtteranceFinished(utteranceId, completedNaturally = false)
+            } finally {
+                pendingOfflineUtterances.decrementAndGet()
             }
         }
     }
@@ -1203,10 +1235,17 @@ class Speaker(private val context: Context? = null) {
     }
 
     private fun abandonAudioFocus() {
-        if (!hasAudioFocus || replyOpen || _isSpeaking.value) return
+        val shouldAbandon = synchronized(ttsStateLock) {
+            if (!hasAudioFocus || replyOpen || _isSpeaking.value || activeUtteranceId != null || pendingOfflineUtterances.get() > 0) {
+                false
+            } else {
+                hasAudioFocus = false
+                true
+            }
+        }
+        if (!shouldAbandon) return
         val ctx = appContext ?: return
         val am = ctx.getSystemService(Context.AUDIO_SERVICE) as? AudioManager ?: return
-        hasAudioFocus = false
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             audioFocusRequest?.let { am.abandonAudioFocusRequest(it) }
         } else {
@@ -1267,6 +1306,15 @@ class Speaker(private val context: Context? = null) {
         SystemClock.elapsedRealtime() < audibleUntil + tailMs ||
             _isSpeaking.value
 
+    /** True while audio output is actively playing OR an offline/system TTS utterance is still initializing. */
+    fun hasPendingOrActiveSpeech(): Boolean = TtsPlaybackPolicy.hasPendingOrActiveSpeech(
+        isPlaying = _isSpeaking.value,
+        hasPendingUtterance = pendingOfflineUtterances.get() > 0 || activeUtteranceId != null,
+        hasActivePreview = _previewPlayback.value.state != VoicePreviewState.Idle,
+        replyOpen = replyOpen,
+        audible = SystemClock.elapsedRealtime() < audibleUntil,
+    )
+
     fun flush() {
         generation++
         audibleUntil = 0
@@ -1311,7 +1359,6 @@ class Speaker(private val context: Context? = null) {
             if (t.state == AudioTrack.STATE_INITIALIZED) {
                 t.pause()
                 t.flush()
-                t.play()
             } else {
                 t.release()
                 track = null

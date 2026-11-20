@@ -27,8 +27,11 @@ class OfflineSpeech private constructor(private val context: Context) {
     private val modelLock = Any()
     @Volatile private var model: Model? = null
     @Volatile private var pinnedByWake = false
+    @Volatile private var cachedAvailable: Boolean? = null
 
-    fun available(): Boolean = runCatching { context.assets.list(ASSETS)?.isNotEmpty() == true }.getOrDefault(false)
+    fun available(): Boolean = cachedAvailable ?: runCatching {
+        context.assets.list(ASSETS)?.isNotEmpty() == true
+    }.getOrDefault(false).also { cachedAvailable = it }
 
     /** Keeps the shared Vosk [Model] pinned in memory while background wake listening is active. */
     fun pinForWake(pinned: Boolean) {
@@ -66,15 +69,18 @@ class OfflineSpeech private constructor(private val context: Context) {
             AudioFormat.ENCODING_PCM_16BIT, maxOf(minBuffer, rate * 2 * BUFFER_S),
         )
         if (record.state != AudioRecord.STATE_INITIALIZED) {
-            record.release()
+            runCatching { record.release() }
             Diag.w("local: mic busy")
             return emptyList()
         }
         // Record first: the mic buffer keeps what the user says while the model loads.
-        record.startRecording()
+        runCatching { record.startRecording() }.onFailure { err ->
+            runCatching { record.release() }
+            throw err
+        }
         val loaded = runCatching { model() }.getOrElse {
-            record.stop()
-            record.release()
+            runCatching { record.stop() }
+            runCatching { record.release() }
             throw it
         }
         return Recognizer(loaded, rate.toFloat()).use { recognizer ->
@@ -93,8 +99,8 @@ class OfflineSpeech private constructor(private val context: Context) {
                     if ((!speaking && elapsed > NO_SPEECH_MS) || elapsed > MAX_MS) break
                 }
             } finally {
-                record.stop()
-                record.release()
+                runCatching { record.stop() }
+                runCatching { record.release() }
             }
             alternatives(recognizer.finalResult)
         }

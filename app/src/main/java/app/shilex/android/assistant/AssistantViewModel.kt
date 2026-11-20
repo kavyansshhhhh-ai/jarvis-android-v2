@@ -5,6 +5,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.PowerManager
 import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
 import app.shilex.android.audio.Speaker
 import app.shilex.android.data.AutomationCategory
 import app.shilex.android.data.PersonalProfile
@@ -29,10 +30,12 @@ import app.shilex.android.wake.WakeDotState
 import app.shilex.android.wake.WakeIndicator
 import app.shilex.android.wake.WakeState
 import app.shilex.android.wake.WakeWordModel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 
 /** The screen's handle on the voice session, which outlives the screen. */
 class AssistantViewModel(app: Application) : AndroidViewModel(app) {
@@ -65,18 +68,45 @@ class AssistantViewModel(app: Application) : AndroidViewModel(app) {
     private val _personalProfile = MutableStateFlow(profileStore.load())
     val personalProfile: StateFlow<PersonalProfile> = _personalProfile.asStateFlow()
 
-    private val _installedApps = MutableStateFlow(
-        runCatching { InstalledAppsRegistry.apps(app) }.getOrDefault(emptyList()),
-    )
+    private val _installedApps = MutableStateFlow(InstalledAppsRegistry.cachedApps())
     val installedApps: StateFlow<List<InstalledAppInfo>> = _installedApps.asStateFlow()
 
     private val _wakeDotSize = MutableStateFlow(WakeDotSize.fromDp(settings.wakeDotSizeDp))
     val wakeDotSizeState: StateFlow<WakeDotSize> = _wakeDotSize.asStateFlow()
 
+    private val _speakResponses = MutableStateFlow(settings.speakResponses)
+    val speakResponsesState: StateFlow<Boolean> = _speakResponses.asStateFlow()
+
+    private val _ttsVoiceId = MutableStateFlow(settings.ttsVoiceId)
+    val ttsVoiceIdState: StateFlow<String?> = _ttsVoiceId.asStateFlow()
+
+    private val _ttsGenderFilter = MutableStateFlow(settings.ttsGenderFilter)
+    val ttsGenderFilterState: StateFlow<String> = _ttsGenderFilter.asStateFlow()
+
+    private val _ttsSpeechRate = MutableStateFlow(settings.ttsSpeechRate)
+    val ttsSpeechRateState: StateFlow<Float> = _ttsSpeechRate.asStateFlow()
+
+    private val _ttsPitch = MutableStateFlow(settings.ttsPitch)
+    val ttsPitchState: StateFlow<Float> = _ttsPitch.asStateFlow()
+
+    init {
+        if (_installedApps.value.isEmpty()) {
+            viewModelScope.launch(Dispatchers.IO) {
+                val resolved = runCatching { InstalledAppsRegistry.apps(app) }.getOrDefault(emptyList())
+                if (resolved.isNotEmpty()) _installedApps.value = resolved
+            }
+        }
+    }
+
     // Android holds preference listeners weakly, so keep this one referenced.
     private val watcher = settings.watch {
         _wakeWord.value = settings.wakeWord
         _wakeDotSize.value = WakeDotSize.fromDp(settings.wakeDotSizeDp)
+        _speakResponses.value = settings.speakResponses
+        _ttsVoiceId.value = settings.ttsVoiceId
+        _ttsGenderFilter.value = settings.ttsGenderFilter
+        _ttsSpeechRate.value = settings.ttsSpeechRate
+        _ttsPitch.value = settings.ttsPitch
         VoiceService.syncState(app)
     }
 
@@ -102,7 +132,11 @@ class AssistantViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun refreshInstalledApps() {
-        _installedApps.value = InstalledAppsRegistry.apps(getApplication(), forceRefresh = true)
+        viewModelScope.launch(Dispatchers.IO) {
+            _installedApps.value = runCatching {
+                InstalledAppsRegistry.apps(getApplication(), forceRefresh = true)
+            }.getOrDefault(_installedApps.value)
+        }
     }
 
     fun launchInstalledApp(packageName: String): Boolean {
@@ -152,7 +186,10 @@ class AssistantViewModel(app: Application) : AndroidViewModel(app) {
 
     var speakResponses: Boolean
         get() = settings.speakResponses
-        set(value) { settings.speakResponses = value }
+        set(value) {
+            settings.speakResponses = value
+            _speakResponses.value = value
+        }
 
     val speaker: Speaker get() = Speaker.get(getApplication())
 
@@ -160,34 +197,48 @@ class AssistantViewModel(app: Application) : AndroidViewModel(app) {
         get() = settings.ttsVoiceId
         set(value) {
             settings.ttsVoiceId = value
+            _ttsVoiceId.value = value
             speaker.applySavedVoiceAndSettings()
         }
 
     var ttsSpeechRate: Float
         get() = settings.ttsSpeechRate
         set(value) {
-            settings.ttsSpeechRate = value
+            val clamped = value.coerceIn(0.5f, 2.0f)
+            settings.ttsSpeechRate = clamped
+            _ttsSpeechRate.value = clamped
             speaker.applySavedVoiceAndSettings()
         }
 
     var ttsPitch: Float
         get() = settings.ttsPitch
         set(value) {
-            settings.ttsPitch = value
+            val clamped = value.coerceIn(0.5f, 1.5f)
+            settings.ttsPitch = clamped
+            _ttsPitch.value = clamped
             speaker.applySavedVoiceAndSettings()
         }
 
     var ttsGenderFilter: String
         get() = settings.ttsGenderFilter
-        set(value) { settings.ttsGenderFilter = Settings.normalizeGenderFilter(value) }
+        set(value) {
+            val normalized = Settings.normalizeGenderFilter(value)
+            settings.ttsGenderFilter = normalized
+            _ttsGenderFilter.value = normalized
+        }
 
     fun refreshTtsVoices() {
+        speaker.refreshAudioOutputState()
         speaker.discoverVoices()
         speaker.applySavedVoiceAndSettings()
     }
 
     fun restoreDefaultTtsVoice() {
         settings.restoreDefaultTtsVoice()
+        _ttsVoiceId.value = settings.ttsVoiceId
+        _ttsGenderFilter.value = settings.ttsGenderFilter
+        _ttsSpeechRate.value = settings.ttsSpeechRate
+        _ttsPitch.value = settings.ttsPitch
         speaker.applySavedVoiceAndSettings()
     }
 

@@ -20,6 +20,12 @@ enum class BundledEngineKind {
     Supertonic,
 }
 
+/** Preview phrase language selector shown in JARVIS VOICE settings. */
+enum class PreviewLanguage(val label: String) {
+    HINDI("Hindi"),
+    ENGLISH("English"),
+}
+
 /** Lightweight, JVM-testable representation of an Android TextToSpeech Voice. */
 data class RawTtsVoice(
     val id: String,
@@ -255,8 +261,17 @@ object BundledHindiVoices {
     private fun assetExists(context: Context, assetPath: String): Boolean =
         runCatching { context.assets.open(assetPath).use { it.available() >= 0 } }.getOrDefault(false)
 
-    fun availableForRuntime(context: Context?): List<TtsVoiceInfo> =
-        ALL.filter { isModelBundled(context, it) }.map { it.toTtsVoiceInfo() }
+    @Volatile private var cachedRuntimeVoices: List<TtsVoiceInfo>? = null
+
+    fun availableForRuntime(context: Context?): List<TtsVoiceInfo> {
+        if (context == null) return emptyList()
+        cachedRuntimeVoices?.takeIf { it.isNotEmpty() }?.let { return it }
+        val resolved = ALL.filter { isModelBundled(context, it) }.map { it.toTtsVoiceInfo() }
+        if (resolved.isNotEmpty()) {
+            cachedRuntimeVoices = resolved
+        }
+        return resolved
+    }
 }
 
 /**
@@ -527,11 +542,20 @@ object VoiceClassifier {
         }
     }
 
+    const val HINDI_PREVIEW_SAMPLE = "नमस्ते! मैं आपकी कैसे मदद कर सकता हूँ?"
+    const val ENGLISH_PREVIEW_SAMPLE = "Hello! I am JARVIS. How can I help you today?"
+
+    /** Localized preview sentence for Hindi vs English sample selector. */
+    fun previewSampleText(language: PreviewLanguage): String = when (language) {
+        PreviewLanguage.HINDI -> HINDI_PREVIEW_SAMPLE
+        PreviewLanguage.ENGLISH -> ENGLISH_PREVIEW_SAMPLE
+    }
+
     /** Localized Hindi preview sentence. */
     fun sampleTextForLocale(locale: Locale): String {
         return when (locale.language.lowercase(Locale.ROOT)) {
-            "hi" -> "नमस्ते! मैं आपकी कैसे मदद कर सकता हूँ?"
-            else -> "Hello! I am JARVIS. How can I help you today?"
+            "hi" -> HINDI_PREVIEW_SAMPLE
+            else -> ENGLISH_PREVIEW_SAMPLE
         }
     }
 }

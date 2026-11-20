@@ -9,11 +9,11 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -40,19 +40,18 @@ fun AnimatedVoiceIndicatorDot(
         snapshot.state != VoiceIndicatorState.OFF &&
         snapshot.state != VoiceIndicatorState.IDLE_TIMEOUT
 
-    val targetAlpha = if (isVisible) 1f else 0f
-    val animatedAlpha by animateFloatAsState(
-        targetValue = targetAlpha,
+    val alphaState = animateFloatAsState(
+        targetValue = if (isVisible) 1f else 0f,
         animationSpec = tween(durationMillis = 200),
         label = "voiceDotAlpha",
     )
 
-    if (animatedAlpha <= 0.005f) return
+    if (!isVisible && alphaState.value <= 0.005f) return
 
     val infinite = rememberInfiniteTransition(label = "voiceDotBreathing")
 
-    // Gentle breathing pulse for listening mode (1.6s cycle)
-    val listeningBreath by infinite.animateFloat(
+    // Gentle breathing pulse for listening mode (1.8s cycle)
+    val listeningBreathState = infinite.animateFloat(
         initialValue = 0.88f,
         targetValue = 1.14f,
         animationSpec = infiniteRepeatable(
@@ -62,8 +61,8 @@ fun AnimatedVoiceIndicatorDot(
         label = "listeningBreath",
     )
 
-    // Smooth speaking breathing fallback (0.9s cycle)
-    val speakingBreathFallback by infinite.animateFloat(
+    // Smooth speaking breathing fallback (0.96s cycle)
+    val speakingBreathState = infinite.animateFloat(
         initialValue = 0.85f,
         targetValue = 1.30f,
         animationSpec = infiniteRepeatable(
@@ -74,68 +73,81 @@ fun AnimatedVoiceIndicatorDot(
     )
 
     // Live speech amplitude smoothing
-    val smoothAmplitude by animateFloatAsState(
+    val smoothAmplitudeState = animateFloatAsState(
         targetValue = snapshot.amplitude.coerceIn(0f, 1f),
         animationSpec = spring(dampingRatio = 0.75f, stiffness = 600f),
         label = "smoothAmplitude",
     )
 
-    val scale = when (snapshot.state) {
-        VoiceIndicatorState.OFF, VoiceIndicatorState.IDLE_TIMEOUT -> 0f
-        VoiceIndicatorState.LISTENING, VoiceIndicatorState.INTERRUPTED -> listeningBreath
-        VoiceIndicatorState.PROCESSING -> 1.05f
-        VoiceIndicatorState.SPEAKING -> {
-            if (smoothAmplitude > 0.02f) {
-                1.0f + smoothAmplitude * 0.75f
-            } else {
-                speakingBreathFallback
-            }
-        }
-    }
-
-    val glowAlphaMultiplier = when (snapshot.state) {
-        VoiceIndicatorState.SPEAKING -> 0.85f + (smoothAmplitude * 0.40f)
-        VoiceIndicatorState.PROCESSING -> 0.70f
-        VoiceIndicatorState.LISTENING, VoiceIndicatorState.INTERRUPTED -> 0.55f
-        else -> 0f
-    }
     val cyanAccent = ElectricCyan
     val violetAccent = NeonViolet
 
-    Canvas(modifier = modifier.size(24.dp)) {
-        val c = center
-        val baseRadius = 5.dp.toPx()
-        val coreRadius = baseRadius * scale
-        val glowRadius = coreRadius * 2.2f
+    Spacer(
+        modifier = modifier
+            .size(24.dp)
+            .drawWithCache {
+                val c = Offset(size.width / 2f, size.height / 2f)
+                val baseRadius = 5.dp.toPx()
 
-        // Outer cyan/violet ambient glow
-        drawCircle(
-            brush = Brush.radialGradient(
-                colors = listOf(
-                    cyanAccent.copy(alpha = 0.65f * animatedAlpha * glowAlphaMultiplier),
-                    violetAccent.copy(alpha = 0.35f * animatedAlpha * glowAlphaMultiplier),
-                    Color.Transparent,
-                ),
-                center = c,
-                radius = glowRadius,
-            ),
-            radius = glowRadius,
-            center = c,
-        )
+                onDrawBehind {
+                    val animatedAlpha = alphaState.value
+                    if (animatedAlpha <= 0.005f) return@onDrawBehind
 
-        // Specular inner luminous core
-        drawCircle(
-            brush = Brush.radialGradient(
-                colors = listOf(
-                    Color.White.copy(alpha = 0.98f * animatedAlpha),
-                    cyanAccent.copy(alpha = 0.95f * animatedAlpha),
-                    violetAccent.copy(alpha = 0.80f * animatedAlpha),
-                ),
-                center = Offset(c.x - coreRadius * 0.22f, c.y - coreRadius * 0.22f),
-                radius = coreRadius * 1.25f,
-            ),
-            radius = coreRadius,
-            center = c,
-        )
-    }
+                    val smoothAmplitude = smoothAmplitudeState.value
+                    val scale = when (snapshot.state) {
+                        VoiceIndicatorState.OFF, VoiceIndicatorState.IDLE_TIMEOUT -> 0f
+                        VoiceIndicatorState.LISTENING, VoiceIndicatorState.INTERRUPTED -> listeningBreathState.value
+                        VoiceIndicatorState.PROCESSING -> 1.05f
+                        VoiceIndicatorState.SPEAKING -> {
+                            if (smoothAmplitude > 0.02f) {
+                                1.0f + smoothAmplitude * 0.75f
+                            } else {
+                                speakingBreathState.value
+                            }
+                        }
+                    }
+
+                    val glowAlphaMultiplier = when (snapshot.state) {
+                        VoiceIndicatorState.SPEAKING -> 0.85f + (smoothAmplitude * 0.40f)
+                        VoiceIndicatorState.PROCESSING -> 0.70f
+                        VoiceIndicatorState.LISTENING, VoiceIndicatorState.INTERRUPTED -> 0.55f
+                        else -> 0f
+                    }
+
+                    val coreRadius = baseRadius * scale
+                    val glowRadius = coreRadius * 2.2f
+
+                    // Outer cyan/violet ambient glow
+                    drawCircle(
+                        brush = Brush.radialGradient(
+                            colors = listOf(
+                                cyanAccent.copy(alpha = 0.65f * animatedAlpha * glowAlphaMultiplier),
+                                violetAccent.copy(alpha = 0.35f * animatedAlpha * glowAlphaMultiplier),
+                                Color.Transparent,
+                            ),
+                            center = c,
+                            radius = glowRadius.coerceAtLeast(1f),
+                        ),
+                        radius = glowRadius,
+                        center = c,
+                    )
+
+                    // Specular inner luminous core
+                    drawCircle(
+                        brush = Brush.radialGradient(
+                            colors = listOf(
+                                Color.White.copy(alpha = 0.98f * animatedAlpha),
+                                cyanAccent.copy(alpha = 0.95f * animatedAlpha),
+                                violetAccent.copy(alpha = 0.80f * animatedAlpha),
+                            ),
+                            center = Offset(c.x - coreRadius * 0.22f, c.y - coreRadius * 0.22f),
+                            radius = (coreRadius * 1.25f).coerceAtLeast(1f),
+                        ),
+                        radius = coreRadius,
+                        center = c,
+                    )
+                }
+            },
+    )
 }
+
