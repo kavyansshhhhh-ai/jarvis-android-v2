@@ -38,6 +38,7 @@ object BookingTools {
         if (seen is SightAim.Outcome.Found) {
             val there = control.nodeAt(seen.x, seen.y)
             val label = there?.let(control::labelOf).orEmpty()
+            there?.let(control::releaseNode)
             if (ControlRules.clickRisk(label.ifEmpty { seen.sees }, "") == ControlRules.Risk.Safe && control.tapAt(seen.x, seen.y)) {
                 delay(CITY_MS)
                 InAppSearch.open(control, city)
@@ -78,7 +79,14 @@ object BookingTools {
             val pm = host.context.packageManager
             val launcher = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
             val installed = pm.queryIntentActivities(launcher, 0).map { InstalledApp(it.loadLabel(pm).toString(), it.activityInfo.packageName) }
-            val app = APPS.firstNotNullOfOrNull { name -> AppMatch.find(name, installed).singleOrNull() }
+            val app = when (val match = TicketAppMatcher.resolve(APPS, installed)) {
+                is TicketAppMatcher.Resolution.Matched -> match.app
+                is TicketAppMatcher.Resolution.Ambiguous -> return Results.ask(
+                    "Several installed ticket apps match ${match.requestedName}. Ask which one to use.",
+                    match.apps.take(5).map { "${it.label} (${it.packageName})" },
+                )
+                TicketAppMatcher.Resolution.NotFound -> null
+            }
             // A fresh start on the app's home screen, not wherever an earlier booking was left.
             val intent = app?.let { pm.getLaunchIntentForPackage(it.packageName) }
                 ?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
@@ -117,6 +125,29 @@ object BookingTools {
                 )
             }
         }
+    }
+}
+
+/** Picks a ticket app only when its visible launcher label is unambiguous. */
+internal object TicketAppMatcher {
+    sealed interface Resolution {
+        data class Matched(val app: InstalledApp) : Resolution
+        data class Ambiguous(val requestedName: String, val apps: List<InstalledApp>) : Resolution
+        data object NotFound : Resolution
+    }
+
+    fun resolve(preferredNames: List<String>, installed: List<InstalledApp>): Resolution {
+        for (name in preferredNames) {
+            val matches = AppMatch.find(name, installed)
+            if (matches.isEmpty()) continue
+            val key = AppCatalog.compactKey(name)
+            val exact = matches.filter { AppCatalog.compactKey(it.label) == key }
+            if (exact.size == 1) return Resolution.Matched(exact.single())
+            if (exact.size > 1) return Resolution.Ambiguous(name, exact)
+            if (matches.size == 1) return Resolution.Matched(matches.single())
+            return Resolution.Ambiguous(name, matches)
+        }
+        return Resolution.NotFound
     }
 }
 

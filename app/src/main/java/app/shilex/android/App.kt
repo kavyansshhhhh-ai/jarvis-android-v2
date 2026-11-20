@@ -5,8 +5,8 @@ import app.shilex.android.orb.FloatingOrb
 import app.shilex.android.tools.InstalledAppsRegistry
 
 /**
- * Starts the diagnostic log file before any screen, service or receiver runs, brings the
- * floating orb back, and indexes installed apps for instant A-Z discovery.
+ * Starts diagnostics before any screen, service or receiver runs, synchronizes temporary
+ * overlay visibility, and indexes installed apps for instant A-Z discovery.
  */
 class App : Application() {
     override fun onCreate() {

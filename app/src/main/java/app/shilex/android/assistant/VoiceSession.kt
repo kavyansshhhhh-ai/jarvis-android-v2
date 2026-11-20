@@ -29,6 +29,7 @@ import app.shilex.android.live.LiveEvent
 import app.shilex.android.live.LiveProtocol
 import app.shilex.android.local.LocalTurn
 import app.shilex.android.orb.WakeActivationOverlay
+import app.shilex.android.orb.FloatingOrb
 import app.shilex.android.task.ActiveTaskContext
 import app.shilex.android.task.CancellationStatus
 import app.shilex.android.task.TaskTracker
@@ -49,7 +50,7 @@ import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
 
-enum class Phase { Off, Connecting, Listening, Speaking }
+enum class Phase { Off, Connecting, Processing, Listening, Speaking }
 
 data class UiState(
     val hasKey: Boolean,
@@ -138,6 +139,11 @@ class VoiceSession private constructor(private val app: Application) : LiveClien
     @Volatile private var mutedChunks = 0
     @Volatile private var loudest = 0
     @Volatile private var turnReceivedAudio = false
+    private data class BufferedReplyAudio(val pcm: ByteArray, val sampleRate: Int)
+    private val bufferedReplyAudioLock = Any()
+    private val bufferedReplyAudio = mutableListOf<BufferedReplyAudio>()
+    private var bufferedReplyAudioBytes = 0
+    private var bufferedReplyAudioOverflowed = false
     private val lastAssistantTurnText = StringBuilder()
     private val lastUserTurnText = StringBuilder()
 
@@ -194,6 +200,7 @@ class VoiceSession private constructor(private val app: Application) : LiveClien
         musicPause.pause()
         if (wanted) return
         wanted = true
+        FloatingOrb.activate(app)
         retries = 0
         resumeHandle = null
         resetTurnLog()
@@ -235,6 +242,7 @@ class VoiceSession private constructor(private val app: Application) : LiveClien
     fun stop(reason: String) {
         if (wanted) Diag.i("session: stop ($reason)")
         wanted = false
+        FloatingOrb.dismiss(app)
         wave.watch(false)
         pendingGalleryDelete?.complete(false)
         pendingGalleryDelete = null
@@ -251,6 +259,9 @@ class VoiceSession private constructor(private val app: Application) : LiveClien
         mic.stop()
         client.close()
         speaker.flush()
+        clearRetainedReplyAudio()
+        turnReceivedAudio = false
+        lastAssistantTurnText.clear()
         transcript.endTurn()
         _state.update {
             it.copy(
@@ -335,7 +346,7 @@ class VoiceSession private constructor(private val app: Application) : LiveClien
         endAfterReplyJob?.cancel()
         endAfterReplyJob = scope.launch {
             delay(300)
-            while (isActive && wanted && (speaker.isAudible(tailMs = 0) || _state.value.phase == Phase.Connecting)) {
+            while (isActive && wanted && (speaker.isAudible(tailMs = 0) || _state.value.phase == Phase.Connecting || _state.value.phase == Phase.Processing)) {
                 delay(100)
             }
             if (isActive && wanted) {
@@ -346,7 +357,7 @@ class VoiceSession private constructor(private val app: Application) : LiveClien
 
     /** Tap or voice barge-in while speaking: silence this reply immediately and return to clean listening. */
     fun interrupt(how: String = "tap") {
-        if (_state.value.phase != Phase.Speaking && !speaker.isAudible(tailMs = 0)) return
+        if (_state.value.phase != Phase.Speaking && _state.value.phase != Phase.Processing && !speaker.isAudible(tailMs = 0)) return
         Diag.i("reply: stopped by $how")
         replyWaitJob?.cancel()
         replyWaitJob = null
@@ -355,6 +366,9 @@ class VoiceSession private constructor(private val app: Application) : LiveClien
         wave.watch(false)
         droppingReply = true
         speaker.flush()
+        turnReceivedAudio = false
+        clearRetainedReplyAudio()
+        lastAssistantTurnText.clear()
         AudioPlaybackState.onLocalTtsEnded()
         AudioPlaybackState.onLiveSpeakerState(active = false)
         lastActivity = SystemClock.elapsedRealtime()
@@ -428,20 +442,29 @@ class VoiceSession private constructor(private val app: Application) : LiveClien
                 }
             }
             is LiveEvent.Audio -> if (!droppingReply) {
+                FloatingOrb.activate(app)
                 turnReceivedAudio = true
                 if (!replyStarted) {
                     replyStarted = true
                     val wait = if (voiceAt > 0) "${SystemClock.elapsedRealtime() - voiceAt} ms after you stopped talking" else "with no voice heard"
                     Diag.i("reply: first audio $wait")
                 }
-                speaker.play(event.pcm, event.sampleRate)
                 val amp = loudness(pcmLevel(event.pcm))
                 _level.value = amp
-                _state.update { it.copy(phase = Phase.Speaking) }
-                VoiceIndicator.onSpeaking(amp)
-                wave.watch(settings.waveToStop)
+                if (LiveResponseVoicePolicy.shouldUseSelectedVoice(settings.ttsVoiceId)) {
+                    if (settings.speakResponses) retainReplyAudio(event.pcm, event.sampleRate)
+                    // Wait for Gemini's transcription and render it with the voice selected in Settings.
+                    _state.update { it.copy(phase = Phase.Processing) }
+                    VoiceIndicator.onProcessing()
+                } else {
+                    speaker.play(event.pcm, event.sampleRate)
+                    _state.update { it.copy(phase = Phase.Speaking) }
+                    VoiceIndicator.onSpeaking(amp)
+                    wave.watch(settings.waveToStop)
+                }
             }
             is LiveEvent.UserText -> {
+                FloatingOrb.activate(app)
                 lastActivity = SystemClock.elapsedRealtime()
                 if (!heardUser) {
                     Diag.i("user: speech heard")
@@ -453,6 +476,7 @@ class VoiceSession private constructor(private val app: Application) : LiveClien
                 _state.update { it.copy(lines = transcript.add(fromUser = true, event.text)) }
             }
             is LiveEvent.AssistantText -> if (!droppingReply) {
+                FloatingOrb.activate(app)
                 lastActivity = SystemClock.elapsedRealtime()
                 lastAssistantTurnText.append(event.text)
                 _state.update { it.copy(lines = transcript.add(fromUser = false, event.text)) }
@@ -468,6 +492,7 @@ class VoiceSession private constructor(private val app: Application) : LiveClien
                 droppingReply = false
                 replyStarted = false
                 turnReceivedAudio = false
+                clearRetainedReplyAudio()
                 lastAssistantTurnText.clear()
                 lastUserTurnText.clear()
                 speaker.flush()
@@ -478,12 +503,21 @@ class VoiceSession private constructor(private val app: Application) : LiveClien
                 VoiceIndicator.onListening(0f)
             }
             LiveEvent.TurnComplete -> {
+                if (droppingReply) {
+                    droppingReply = false
+                    turnReceivedAudio = false
+                    clearRetainedReplyAudio()
+                    lastAssistantTurnText.clear()
+                    return
+                }
                 replyWaitJob?.cancel()
                 replyWaitJob = null
                 speaker.endReply()
                 val textToSpeak = lastAssistantTurnText.toString()
                 val receivedAudio = turnReceivedAudio
                 turnReceivedAudio = false
+                val retainedAudio = takeRetainedReplyAudio()
+                val selectedLocalVoice = LiveResponseVoicePolicy.shouldUseSelectedVoice(settings.ttsVoiceId)
                 lastAssistantTurnText.clear()
                 lastUserTurnText.clear()
                 logTurnEnd()
@@ -491,8 +525,8 @@ class VoiceSession private constructor(private val app: Application) : LiveClien
                 transcript.endTurn()
 
                 // If Gemini Live stream sent text reply but no audio chunks (or audio dropped), fallback to local TTS!
-                if (!receivedAudio && textToSpeak.isNotBlank() && settings.speakResponses) {
-                    Diag.i("reply: falling back to local TTS for assistant text: ${textToSpeak.take(40)}...")
+                if ((!receivedAudio || selectedLocalVoice) && textToSpeak.isNotBlank() && settings.speakResponses) {
+                    Diag.i("reply: speaking assistant text with the selected local voice")
                     _state.update { it.copy(phase = Phase.Speaking) }
                     VoiceIndicator.onSpeaking(0.45f)
                     wave.watch(settings.waveToStop)
@@ -515,10 +549,17 @@ class VoiceSession private constructor(private val app: Application) : LiveClien
                                 _state.update { it.copy(phase = Phase.Listening) }
                                 VoiceIndicator.onListening(0f)
                             }
+                            FloatingOrb.replyFinished(app)
                             tools.openPending()
                         }
                     }
-                } else {
+                } else if (selectedLocalVoice && settings.speakResponses && receivedAudio && retainedAudio.chunks.isNotEmpty()) {
+                    Diag.w("reply: selected local voice had no transcript; replaying retained Gemini audio")
+                    _state.update { it.copy(phase = Phase.Speaking) }
+                    VoiceIndicator.onSpeaking(0.45f)
+                    retainedAudio.chunks.forEach { chunk -> speaker.play(chunk.pcm, chunk.sampleRate) }
+                    speaker.endReply()
+                    wave.watch(settings.waveToStop)
                     replyWaitJob = scope.launch {
                         while (isActive && wanted && speaker.isAudible(tailMs = 0)) delay(100)
                         if (!isActive || !wanted) return@launch
@@ -527,11 +568,34 @@ class VoiceSession private constructor(private val app: Application) : LiveClien
                             _state.update { it.copy(phase = Phase.Listening) }
                             VoiceIndicator.onListening(0f)
                         }
+                        FloatingOrb.replyFinished(app)
+                        tools.openPending()
+                    }
+                } else {
+                    if (selectedLocalVoice && settings.speakResponses && receivedAudio && textToSpeak.isBlank()) {
+                        val detail = if (retainedAudio.overflowed) {
+                            "Gemini provided no text for the selected voice, and its audio fallback exceeded the safe memory limit."
+                        } else {
+                            "Gemini provided no text for the selected voice to speak."
+                        }
+                        _state.update { it.copy(problem = detail) }
+                        Diag.w("reply: selected local voice unavailable because the audio response had no transcription")
+                    }
+                    replyWaitJob = scope.launch {
+                        while (isActive && wanted && speaker.isAudible(tailMs = 0)) delay(100)
+                        if (!isActive || !wanted) return@launch
+                        wave.watch(false)
+                        if (_state.value.phase == Phase.Speaking) {
+                            _state.update { it.copy(phase = Phase.Listening) }
+                            VoiceIndicator.onListening(0f)
+                        }
+                        FloatingOrb.replyFinished(app)
                         tools.openPending()
                     }
                 }
             }
             is LiveEvent.ToolCall -> {
+                FloatingOrb.activate(app)
                 lastActivity = SystemClock.elapsedRealtime()
                 VoiceIndicator.onProcessing()
                 tools.handle(event.calls)
@@ -606,10 +670,47 @@ class VoiceSession private constructor(private val app: Application) : LiveClien
         loudest = 0
         talkOver.reset()
         lastUserTurnText.clear()
+        clearRetainedReplyAudio()
 
         heardUser = false
         voiceAt = 0
         replyStarted = false
+    }
+
+    private data class RetainedReplyAudio(
+        val chunks: List<BufferedReplyAudio>,
+        val overflowed: Boolean,
+    )
+
+    private fun retainReplyAudio(pcm: ByteArray, sampleRate: Int) {
+        synchronized(bufferedReplyAudioLock) {
+            if (bufferedReplyAudioOverflowed) return
+            if (!LiveResponseVoicePolicy.canRetainAudio(bufferedReplyAudioBytes, pcm.size)) {
+                bufferedReplyAudio.clear()
+                bufferedReplyAudioBytes = 0
+                bufferedReplyAudioOverflowed = true
+                Diag.w("reply: retained Gemini audio fallback exceeded its memory budget")
+                return
+            }
+            bufferedReplyAudio += BufferedReplyAudio(pcm.copyOf(), sampleRate)
+            bufferedReplyAudioBytes += pcm.size
+        }
+    }
+
+    private fun takeRetainedReplyAudio(): RetainedReplyAudio = synchronized(bufferedReplyAudioLock) {
+        val result = RetainedReplyAudio(bufferedReplyAudio.toList(), bufferedReplyAudioOverflowed)
+        bufferedReplyAudio.clear()
+        bufferedReplyAudioBytes = 0
+        bufferedReplyAudioOverflowed = false
+        result
+    }
+
+    private fun clearRetainedReplyAudio() {
+        synchronized(bufferedReplyAudioLock) {
+            bufferedReplyAudio.clear()
+            bufferedReplyAudioBytes = 0
+            bufferedReplyAudioOverflowed = false
+        }
     }
 
     companion object {

@@ -1,5 +1,6 @@
 package app.shilex.android.ui
 
+import android.app.Activity
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
@@ -8,7 +9,18 @@ import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.ReadOnlyComposable
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
+import androidx.core.view.WindowCompat
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
@@ -16,53 +28,94 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import app.shilex.android.data.AppearanceMode
+import app.shilex.android.data.Settings
 
 // ==========================================
 // AMOLED Liquid Glass Palette (Frosted Dark)
 // ==========================================
-val OledBlack = Color(0xFF000000)
-val GlassSurface = Color(0xBF151519) // 75% smoked translucent obsidian glass
-val GlassSurfaceVariant = Color(0xCC1C1C22) // 80% elevated frosted card
-val GlassSurfaceElevated = Color(0xE0222229) // 88% modal / floating glass
-val GlassSurfaceHighlight = Color(0x28FFFFFF) // crisp specular rim sheen
+private val DarkBackground = Color(0xFF000000)
+private val DarkSurface = Color(0xFF151519)
+private val DarkSurfaceVariant = Color(0xFF1C1C22)
+private val DarkSurfaceElevated = Color(0xFF222229)
+private val LightBackground = Color(0xFFF3F7F9)
+private val LightSurface = Color(0xFFFFFFFF)
+private val LightSurfaceVariant = Color(0xFFE7EEF1)
+private val LightSurfaceElevated = Color(0xFFFFFFFF)
 
 // Accents
-val ElectricCyan = Color(0xFF38E5FF)
-val DeepCyan = Color(0xFF0B3542)
-val NeonViolet = Color(0xFF9D65FF)
-val SoftPink = Color(0xFFF472B6)
-val AmberWarning = Color(0xFFFFB038)
-val CoralError = Color(0xFFFF6363)
-val SlateMuted = Color(0xFF9898A3)
-val PureWhite = Color(0xFFF9FAFB)
+private val DarkCyan = Color(0xFF38E5FF)
+private val LightCyan = Color(0xFF006C7B)
+private val DeepCyan = Color(0xFF0B3542)
+private val DarkViolet = Color(0xFF9D65FF)
+private val LightViolet = Color(0xFF7044AE)
+private val DarkPink = Color(0xFFF472B6)
+private val LightPink = Color(0xFFB52F78)
+private val DarkAmber = Color(0xFFFFB038)
+private val LightAmber = Color(0xFF8A5300)
+private val DarkError = Color(0xFFFF6363)
+private val LightError = Color(0xFFB3261E)
+
+val OledBlack: Color @Composable @ReadOnlyComposable get() = MaterialTheme.colorScheme.background
+val GlassSurface: Color @Composable @ReadOnlyComposable get() = MaterialTheme.colorScheme.surface
+val GlassSurfaceVariant: Color @Composable @ReadOnlyComposable get() = MaterialTheme.colorScheme.surfaceVariant
+val GlassSurfaceElevated: Color @Composable @ReadOnlyComposable get() = MaterialTheme.colorScheme.surfaceContainer
+val GlassSurfaceHighlight: Color @Composable @ReadOnlyComposable get() = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.10f)
+val ElectricCyan: Color @Composable @ReadOnlyComposable get() = if (MaterialTheme.colorScheme.background == DarkBackground) DarkCyan else LightCyan
+val NeonViolet: Color @Composable @ReadOnlyComposable get() = if (MaterialTheme.colorScheme.background == DarkBackground) DarkViolet else LightViolet
+val SoftPink: Color @Composable @ReadOnlyComposable get() = if (MaterialTheme.colorScheme.background == DarkBackground) DarkPink else LightPink
+val AmberWarning: Color @Composable @ReadOnlyComposable get() = if (MaterialTheme.colorScheme.background == DarkBackground) DarkAmber else LightAmber
+val CoralError: Color @Composable @ReadOnlyComposable get() = if (MaterialTheme.colorScheme.background == DarkBackground) DarkError else LightError
+val SlateMuted: Color @Composable @ReadOnlyComposable get() = MaterialTheme.colorScheme.onSurfaceVariant
+val PureWhite: Color @Composable @ReadOnlyComposable get() = MaterialTheme.colorScheme.onBackground
 
 // Glass Borders
-val GlassBorderColor = Color(0x2BFFFFFF) // crisp frosted white rim
-val GlassBorderSubtle = Color(0x18FFFFFF) // subtle divider / edge
-val GlassDividerColor = Color(0x14FFFFFF)
+val GlassBorderColor: Color @Composable @ReadOnlyComposable get() = MaterialTheme.colorScheme.outlineVariant
+val GlassBorderSubtle: Color @Composable @ReadOnlyComposable get() = MaterialTheme.colorScheme.outline.copy(alpha = 0.62f)
+val GlassDividerColor: Color @Composable @ReadOnlyComposable get() = MaterialTheme.colorScheme.outline.copy(alpha = 0.42f)
 
 private val Dark = darkColorScheme(
-    primary = ElectricCyan,
+    primary = DarkCyan,
     onPrimary = Color(0xFF001B22),
     primaryContainer = DeepCyan,
     onPrimaryContainer = Color(0xFFD0F7FF),
-    secondary = NeonViolet,
+    secondary = DarkViolet,
     onSecondary = Color(0xFF1E0A40),
     secondaryContainer = Color(0xFF2B1654),
-    tertiary = AmberWarning,
-    background = OledBlack,
-    onBackground = PureWhite,
-    surface = OledBlack,
-    onSurface = PureWhite,
-    surfaceVariant = GlassSurfaceVariant,
-    onSurfaceVariant = SlateMuted,
-    surfaceContainer = Color(0xE6101014),
-    outline = GlassBorderSubtle,
-    outlineVariant = GlassBorderColor,
-    error = CoralError,
+    tertiary = DarkAmber,
+    background = DarkBackground,
+    onBackground = Color(0xFFF9FAFB),
+    surface = DarkBackground,
+    onSurface = Color(0xFFF9FAFB),
+    surfaceVariant = DarkSurfaceVariant,
+    onSurfaceVariant = Color(0xFF9898A3),
+    surfaceContainer = DarkSurface,
+    outline = Color(0x2BFFFFFF),
+    outlineVariant = Color(0x3AFFFFFF),
+    error = DarkError,
 )
 
-private val Light = Dark // High-contrast AMOLED Liquid Glass dark experience
+private val Light = lightColorScheme(
+    primary = LightCyan,
+    onPrimary = Color.White,
+    primaryContainer = Color(0xFFC8EDF1),
+    onPrimaryContainer = Color(0xFF00363E),
+    secondary = LightViolet,
+    onSecondary = Color.White,
+    secondaryContainer = Color(0xFFEADDFF),
+    onSecondaryContainer = Color(0xFF271044),
+    tertiary = LightAmber,
+    background = LightBackground,
+    onBackground = Color(0xFF17252B),
+    surface = LightSurface,
+    onSurface = Color(0xFF17252B),
+    surfaceVariant = LightSurfaceVariant,
+    onSurfaceVariant = Color(0xFF526168),
+    surfaceContainer = LightSurfaceElevated,
+    outline = Color(0xFF84969D),
+    outlineVariant = Color(0xFFC7D4D9),
+    error = LightError,
+)
 
 private val Type = Typography(
     displaySmall = TextStyle(
@@ -138,16 +191,52 @@ private val Corners = Shapes(
     large = RoundedCornerShape(30.dp),
 )
 
-/** AMOLED Liquid Glass theme on deep black. */
+private val LocalAppearanceMode = compositionLocalOf { AppearanceMode.Dark }
+
+/** JARVIS Liquid Glass theme with persistent dark, light, and live system modes. */
 @Composable
 fun ShilexTheme(content: @Composable () -> Unit) {
-    MaterialTheme(
-        colorScheme = Dark,
-        typography = Type,
-        shapes = Corners,
-        content = content,
-    )
+    val context = LocalContext.current
+    val preferences = remember(context) { context.getSharedPreferences("settings", android.content.Context.MODE_PRIVATE) }
+    var savedMode by remember(preferences) {
+        mutableStateOf(Settings(context).appearanceMode)
+    }
+    DisposableEffect(preferences) {
+        val listener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+            if (key == Settings.PREF_APPEARANCE_MODE) savedMode = Settings(context).appearanceMode
+        }
+        preferences.registerOnSharedPreferenceChangeListener(listener)
+        onDispose { preferences.unregisterOnSharedPreferenceChangeListener(listener) }
+    }
+    val systemDark = androidx.compose.foundation.isSystemInDarkTheme()
+    val dark = when (savedMode) {
+        AppearanceMode.Dark -> true
+        AppearanceMode.Light -> false
+        AppearanceMode.System -> systemDark
+    }
+    val view = LocalView.current
+    val window = (context as? Activity)?.window
+    SideEffect {
+        if (window != null) {
+            WindowCompat.getInsetsController(window, view).apply {
+                isAppearanceLightStatusBars = !dark
+                isAppearanceLightNavigationBars = !dark
+            }
+        }
+    }
+    CompositionLocalProvider(LocalAppearanceMode provides savedMode) {
+        MaterialTheme(
+            colorScheme = if (dark) Dark else Light,
+            typography = Type,
+            shapes = Corners,
+            content = content,
+        )
+    }
 }
+
+@Composable
+@ReadOnlyComposable
+fun currentAppearanceMode(): AppearanceMode = LocalAppearanceMode.current
 
 // Common color accessors for screens
 val Accent: Color @Composable @ReadOnlyComposable get() = MaterialTheme.colorScheme.primary
@@ -158,81 +247,52 @@ val Muted: Color @Composable @ReadOnlyComposable get() = MaterialTheme.colorSche
 val Warning: Color @Composable @ReadOnlyComposable get() = MaterialTheme.colorScheme.tertiary
 
 // Smoked Frosted Liquid Glass Brushes (cached once to eliminate per-frame allocations)
-val GlassBorderGradient: Brush = Brush.verticalGradient(
+val GlassBorderGradient: Brush @Composable @ReadOnlyComposable get() = Brush.verticalGradient(
     listOf(
-        Color(0x47FFFFFF), // crisp top specular highlight
-        Color(0x1CFFFFFF),
-        Color(0x28FFFFFF), // subtle bottom glass refraction
+        MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.95f),
+        MaterialTheme.colorScheme.outline.copy(alpha = 0.34f),
+        MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.62f),
     ),
 )
 
-val GlassSurfaceGradient: Brush = Brush.verticalGradient(
+val GlassSurfaceGradient: Brush @Composable @ReadOnlyComposable get() = Brush.verticalGradient(
+    listOf(MaterialTheme.colorScheme.surfaceVariant, MaterialTheme.colorScheme.surface),
+)
+
+val GlassDockSurfaceGradient: Brush @Composable @ReadOnlyComposable get() = Brush.verticalGradient(
+    listOf(MaterialTheme.colorScheme.surfaceContainer, MaterialTheme.colorScheme.surface),
+)
+
+val GlassDockBorderGradient: Brush @Composable @ReadOnlyComposable get() = Brush.verticalGradient(
     listOf(
-        Color(0xCC1B1B20),
-        Color(0xB3121216),
+        MaterialTheme.colorScheme.outlineVariant,
+        ElectricCyan.copy(alpha = 0.50f),
+        MaterialTheme.colorScheme.outline.copy(alpha = 0.62f),
     ),
 )
 
-val GlassDockSurfaceGradient: Brush = Brush.verticalGradient(
-    listOf(
-        Color(0xB81D1D23),
-        Color(0xD6111115),
-    ),
+val GlassAccentGradient: Brush @Composable @ReadOnlyComposable get() = Brush.horizontalGradient(listOf(ElectricCyan, NeonViolet))
+
+val UserChatBubbleGradient: Brush @Composable @ReadOnlyComposable get() = Brush.horizontalGradient(
+    listOf(ElectricCyan, if (MaterialTheme.colorScheme.background == DarkBackground) Color(0xFF7C3AED) else LightViolet),
 )
 
-val GlassDockBorderGradient: Brush = Brush.verticalGradient(
-    listOf(
-        Color(0x59FFFFFF),
-        Color(0x2138E5FF),
-        Color(0x30FFFFFF),
-    ),
+val LiveStopButtonGradient: Brush @Composable @ReadOnlyComposable get() = Brush.verticalGradient(
+    listOf(CoralError, CoralError.copy(alpha = 0.78f)),
 )
 
-val GlassAccentGradient: Brush = Brush.horizontalGradient(
-    listOf(
-        Color(0xFF38E5FF),
-        Color(0xFF9D65FF),
-    ),
+val TalkButtonGradient: Brush @Composable @ReadOnlyComposable get() = Brush.verticalGradient(
+    listOf(ElectricCyan.copy(alpha = 0.88f), ElectricCyan),
 )
 
-val UserChatBubbleGradient: Brush = Brush.horizontalGradient(
-    listOf(
-        Color(0xFF38E5FF),
-        Color(0xFF7C3AED),
-    ),
+val ButtonRimGradient: Brush @Composable @ReadOnlyComposable get() = Brush.verticalGradient(
+    listOf(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.24f), MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)),
 )
 
-val LiveStopButtonGradient: Brush = Brush.verticalGradient(
-    listOf(
-        Color(0xFFE54D4D),
-        Color(0xFF9E1F1F),
-    ),
+val NeutralRowIconBgGradient: Brush @Composable @ReadOnlyComposable get() = Brush.verticalGradient(
+    listOf(MaterialTheme.colorScheme.surfaceVariant, MaterialTheme.colorScheme.surface),
 )
 
-val TalkButtonGradient: Brush = Brush.verticalGradient(
-    listOf(
-        Color(0xFF45EEFF),
-        Color(0xFF0C94A8),
-    ),
-)
-
-val ButtonRimGradient: Brush = Brush.verticalGradient(
-    listOf(
-        Color(0xAAFFFFFF),
-        Color(0x33FFFFFF),
-    ),
-)
-
-val NeutralRowIconBgGradient: Brush = Brush.verticalGradient(
-    listOf(
-        Color(0x21FFFFFF),
-        Color(0x0DFFFFFF),
-    ),
-)
-
-val NeutralRowIconBorderGradient: Brush = Brush.verticalGradient(
-    listOf(
-        Color(0x33FFFFFF),
-        Color(0x10FFFFFF),
-    ),
+val NeutralRowIconBorderGradient: Brush @Composable @ReadOnlyComposable get() = Brush.verticalGradient(
+    listOf(MaterialTheme.colorScheme.outlineVariant, MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)),
 )

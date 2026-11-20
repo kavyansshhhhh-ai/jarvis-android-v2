@@ -289,7 +289,7 @@ object PermissionRegistry {
             id = PermissionId.Overlay,
             title = "Display Over Other Apps",
             category = PermissionCategory.SpecialSetting,
-            reason = "Shows the subtle wake-word dot and Floating Orb over other apps (automatically hidden on PIN, banking, and lock screens).",
+            reason = "Allows a temporary wake indicator or assistant Orb over other apps when JARVIS is active. Nothing stays visible when idle; hidden on PIN, banking, and lock screens.",
             dependentFeature = "Wake indicator dot & Floating Orb",
         ),
         PermissionSpec(

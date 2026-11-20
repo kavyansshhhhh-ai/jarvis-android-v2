@@ -289,6 +289,7 @@ private fun PermissionItemRow(
     }
 }
 
+@Composable
 fun permissionStatusColor(status: PermissionStatus): Color = when (status) {
     PermissionStatus.Granted -> ElectricCyan
     PermissionStatus.NotGranted -> AmberWarning

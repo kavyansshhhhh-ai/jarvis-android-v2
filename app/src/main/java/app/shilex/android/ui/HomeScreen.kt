@@ -91,6 +91,7 @@ private fun status(state: UiState, local: LocalPhase, wakeOn: Boolean): Status =
     local == LocalPhase.Doing -> Status("Working", "Executing on this phone…", "On phone", Phase.Connecting, true)
     local == LocalPhase.Speaking -> Status("Speaking", "Answered on this phone.", "On phone", Phase.Speaking, true)
     state.phase == Phase.Connecting -> Status("Thinking", "Connecting to Gemini intelligence…", "Gemini", Phase.Connecting, true)
+    state.phase == Phase.Processing -> Status("Preparing voice", "Applying your selected voice…", "JARVIS", Phase.Connecting, true)
     state.phase == Phase.Listening -> Status("Listening", "Talk any time, in English, Hindi or Hinglish.", "Gemini", Phase.Listening, true)
     state.phase == Phase.Speaking -> Status("Speaking", "Tap the orb to cut in.", "Gemini", Phase.Speaking, true)
     else -> Status(
@@ -279,7 +280,7 @@ fun HomeScreen(
                             .semantics { contentDescription = "${Branding.ASSISTANT_NAME}: ${now.title}" }
                             .clickable(remember { MutableInteractionSource() }, indication = null) {
                                 when {
-                                    state.phase == Phase.Speaking || localPhase == LocalPhase.Speaking -> onInterrupt()
+                                    state.phase == Phase.Speaking || state.phase == Phase.Processing || localPhase == LocalPhase.Speaking -> onInterrupt()
                                     state.phase == Phase.Off && localPhase == LocalPhase.Idle -> startListening()
                                     else -> Unit
                                 }
@@ -316,7 +317,7 @@ fun HomeScreen(
                                     .semantics { contentDescription = "${Branding.ASSISTANT_NAME}: ${now.title}" }
                                     .clickable(orbInteraction, indication = null) {
                                         when {
-                                            state.phase == Phase.Speaking || localPhase == LocalPhase.Speaking -> onInterrupt()
+                                            state.phase == Phase.Speaking || state.phase == Phase.Processing || localPhase == LocalPhase.Speaking -> onInterrupt()
                                             state.phase == Phase.Off && localPhase == LocalPhase.Idle -> startListening()
                                             else -> Unit
                                         }

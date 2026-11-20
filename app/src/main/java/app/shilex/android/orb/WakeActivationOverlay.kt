@@ -184,9 +184,11 @@ fun TinyWakeDot(
         ),
         label = "pulse",
     )
+    val cyanAccent = ElectricCyan
+    val violetAccent = NeonViolet
 
     Canvas(modifier = modifier.size(dotSize.canvasDp.dp)) {
-        drawWakeDot(alpha = alpha.value, pulse = pulse, dotSize = dotSize)
+        drawWakeDot(alpha = alpha.value, pulse = pulse, dotSize = dotSize, cyan = cyanAccent, violet = violetAccent)
     }
 }
 
@@ -208,8 +210,10 @@ fun TinyWakeDotPreview(
         ),
         label = "previewPulse",
     )
+    val cyanAccent = ElectricCyan
+    val violetAccent = NeonViolet
     Canvas(modifier = modifier.size(dotSize.canvasDp.dp)) {
-        drawWakeDot(alpha = 1f, pulse = pulse, dotSize = dotSize)
+        drawWakeDot(alpha = 1f, pulse = pulse, dotSize = dotSize, cyan = cyanAccent, violet = violetAccent)
     }
 }
 
@@ -217,6 +221,8 @@ private fun DrawScope.drawWakeDot(
     alpha: Float,
     pulse: Float,
     dotSize: WakeDotSize,
+    cyan: Color,
+    violet: Color,
 ) {
     if (alpha <= 0.01f) return
     val coreRadius = (dotSize.coreDiameterDp / 2f).dp.toPx() * (0.96f + 0.08f * (pulse - 0.90f) / 0.22f)
@@ -226,8 +232,8 @@ private fun DrawScope.drawWakeDot(
     drawCircle(
         brush = Brush.radialGradient(
             colors = listOf(
-                ElectricCyan.copy(alpha = 0.60f * alpha),
-                NeonViolet.copy(alpha = 0.34f * alpha),
+                cyan.copy(alpha = 0.60f * alpha),
+                violet.copy(alpha = 0.34f * alpha),
                 Color.Transparent,
             ),
             center = center,
@@ -242,8 +248,8 @@ private fun DrawScope.drawWakeDot(
         brush = Brush.radialGradient(
             colors = listOf(
                 Color.White.copy(alpha = 0.98f * alpha),
-                ElectricCyan.copy(alpha = 0.96f * alpha),
-                NeonViolet.copy(alpha = 0.92f * alpha),
+                cyan.copy(alpha = 0.96f * alpha),
+                violet.copy(alpha = 0.92f * alpha),
             ),
             center = Offset(center.x - coreRadius * 0.26f, center.y - coreRadius * 0.26f),
             radius = coreRadius * 1.32f,

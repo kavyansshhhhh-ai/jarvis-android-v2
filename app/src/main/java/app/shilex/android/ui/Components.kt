@@ -107,11 +107,12 @@ fun GlassRowIcon(
     modifier: Modifier = Modifier,
 ) {
     val iconShape = remember { RoundedCornerShape(10.dp) }
-    val bgBrush = remember(tint, accentGlow) {
+    val neutralBackground = NeutralRowIconBgGradient
+    val bgBrush = remember(tint, accentGlow, neutralBackground) {
         if (accentGlow) {
             Brush.verticalGradient(listOf(tint.copy(alpha = 0.24f), tint.copy(alpha = 0.10f)))
         } else {
-            NeutralRowIconBgGradient
+            neutralBackground
         }
     }
     val borderBrush = remember(tint, accentGlow) {
@@ -236,7 +237,7 @@ fun IosGlassSwitch(
         label = "switchTrackAlpha",
     )
     val borderColor by animateColorAsState(
-        targetValue = if (checked) Color(0x7038E5FF) else Color(0x28FFFFFF),
+        targetValue = if (checked) ElectricCyan.copy(alpha = 0.72f) else GlassBorderColor.copy(alpha = 0.72f),
         animationSpec = tween(durationMillis = 200),
         label = "switchBorder",
     )
@@ -250,7 +251,7 @@ fun IosGlassSwitch(
         modifier = Modifier
             .size(width = 50.dp, height = 30.dp)
             .clip(switchShape)
-            .background(Color(0x24FFFFFF))
+            .background(GlassSurfaceHighlight)
             .border(1.dp, borderColor, switchShape)
             .clickable(
                 interactionSource = switchInteraction,

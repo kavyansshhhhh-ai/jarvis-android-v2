@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Fetches and prepares genuine offline Hindi neural TTS runtime (Sherpa-ONNX static AAR)
-and model assets (Piper hi_IN int8 + Kokoro multi-lang int8 + Supertonic-3 int8 + espeak-ng-data)
+Fetches and prepares genuine offline Hindi/English neural TTS runtime (Sherpa-ONNX static AAR)
+and Supertonic-3 int8 model assets
 into app/libs and app/build/generated/tts-assets. Idempotent, validated, and safe for CI/Gradle.
 """
 import http.client
@@ -67,8 +67,9 @@ SUPERTONIC_REQUIRED_FILES = (
     "tts.json",
     "unicode_indexer.bin",
     "voice.bin",
+    "LICENSE",
 )
-SUPERTONIC_EXTRACT_FILES = SUPERTONIC_REQUIRED_FILES + ("LICENSE",)
+SUPERTONIC_EXTRACT_FILES = SUPERTONIC_REQUIRED_FILES
 
 ESPEAK_REQUIRED_FILES = (
     "hi_dict",
@@ -79,7 +80,7 @@ ESPEAK_REQUIRED_FILES = (
     "lang/inc/hi",
 )
 
-STAMP_FILE = ASSETS_OUT / ".tts-assets-v2.ready"
+STAMP_FILE = ASSETS_OUT / ".tts-assets-v3.ready"
 
 DOWNLOAD_TIMEOUT_SECONDS = 60
 MAX_DOWNLOAD_ATTEMPTS = 4
@@ -428,18 +429,6 @@ def validate_all_prepared_assets() -> list[str]:
     except Exception as exc:
         missing.append(f"AAR ({exc})")
 
-    espeak_dir = ASSETS_OUT / "espeak-ng-data"
-    for rel in ESPEAK_REQUIRED_FILES:
-        if not _non_empty_file(espeak_dir / rel):
-            missing.append(f"espeak-ng-data/{rel}")
-
-    for name, _, stem in PIPER_MODELS:
-        if not _piper_outputs_valid(name, stem):
-            missing.append(f"piper/{name}")
-
-    if not _kokoro_outputs_valid():
-        missing.append("kokoro")
-
     if not _supertonic_outputs_valid():
         missing.append("supertonic")
 
@@ -464,11 +453,13 @@ def run() -> int:
         label="Sherpa-ONNX AAR",
     )
 
-    # 2. Prepare all neural TTS model assets
+    # 2. Prepare the verified multilingual Supertonic-3 model only.
     ASSETS_OUT.mkdir(parents=True, exist_ok=True)
-    for name, url, stem in PIPER_MODELS:
-        extract_piper(name, url, stem)
-    extract_kokoro()
+    # Remove generated assets from the previous catalog so unsupported languages and
+    # unused models are not accidentally packaged into the APK.
+    for stale_dir in (ASSETS_OUT / "piper", ASSETS_OUT / "kokoro", ASSETS_OUT / "espeak-ng-data"):
+        if stale_dir.exists():
+            shutil.rmtree(stale_dir)
     extract_supertonic()
 
     # 3. Verify every required asset before writing ready stamp
@@ -478,10 +469,14 @@ def run() -> int:
         raise RuntimeError(f"Asset verification failed after extraction: {', '.join(problems)}")
 
     manifest = {
-        "espeak_files": sum(1 for p in (ASSETS_OUT / "espeak-ng-data").rglob("*") if p.is_file()),
-        "piper": [name for name, _, _ in PIPER_MODELS],
-        "kokoro_speakers": {"hf_alpha": 31, "hf_beta": 32, "hm_omega": 33, "hm_psi": 34},
-        "supertonic_speakers": {"F1": 0, "F2": 1, "M1": 5},
+        "engine": "Supertonic-3",
+        "languages": ["hi", "en"],
+        "sample_rate": 24000,
+        "model_license": "OpenRAIL-M",
+        "supertonic_speakers": {
+            "F1": 0, "F2": 1, "F3": 2, "F4": 3, "F5": 4,
+            "M1": 5, "M2": 6, "M3": 7, "M4": 8, "M5": 9,
+        },
     }
     stamp_tmp = STAMP_FILE.with_name(f"{STAMP_FILE.name}.tmp")
     stamp_tmp.write_text(json.dumps(manifest, indent=2), encoding="utf-8")

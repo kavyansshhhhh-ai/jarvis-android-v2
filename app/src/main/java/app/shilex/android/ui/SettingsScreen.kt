@@ -74,6 +74,7 @@ import app.shilex.android.Branding
 import app.shilex.android.assistant.AssistantViewModel
 import app.shilex.android.audio.VoiceClassifier
 import app.shilex.android.data.Settings as AppSettings
+import app.shilex.android.data.AppearanceMode
 import app.shilex.android.memory.MemoryStore
 import app.shilex.android.orb.FloatingOrb
 import app.shilex.android.orb.TinyWakeDotPreview
@@ -237,6 +238,7 @@ private fun SettingsMainContent(
     var engine by remember { mutableStateOf(assistant.speechEngine) }
     var dotOn by remember { mutableStateOf(assistant.wakeIndicator) }
     var dotDurationMs by remember { mutableLongStateOf(assistant.wakeDotDurationMs) }
+    var appearanceMode by remember { mutableStateOf(AppSettings(context).appearanceMode) }
 
     val micGranted = permissionSnapshot.deduplicatedItems
         .firstOrNull { it.spec.id == PermissionId.Microphone }
@@ -301,6 +303,44 @@ private fun SettingsMainContent(
                     color = Muted,
                     modifier = Modifier.padding(top = 4.dp),
                 )
+            }
+        }
+
+        item(key = "appearance") {
+            Section("Appearance") {
+                Text(
+                    "Choose how JARVIS looks across chat, settings, dialogs, and overlays.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Muted,
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    AppearanceMode.entries.forEach { mode ->
+                        val selected = appearanceMode == mode
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(if (selected) ElectricCyan.copy(alpha = 0.15f) else GlassSurfaceVariant)
+                                .border(
+                                    1.dp,
+                                    if (selected) ElectricCyan.copy(alpha = 0.62f) else GlassBorderSubtle,
+                                    RoundedCornerShape(14.dp),
+                                )
+                                .clickable {
+                                    appearanceMode = mode
+                                    AppSettings(context).appearanceMode = mode
+                                }
+                                .padding(vertical = 11.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(
+                                mode.label,
+                                style = MaterialTheme.typography.labelLarge,
+                                color = if (selected) ElectricCyan else PureWhite,
+                            )
+                        }
+                    }
+                }
             }
         }
 
@@ -556,7 +596,7 @@ private fun SettingsMainContent(
             SwitchRow(
                 "Use ${Branding.ASSISTANT_NAME} over any app",
                 if (overlayAllowed) {
-                    "A small orb floats over your apps. Tap to talk, double-tap to type, drag to move."
+                    "A temporary orb appears only while ${Branding.ASSISTANT_NAME} is active. Tap to talk, double-tap to type, long-press to close."
                 } else {
                     "Display Over Other Apps is off. Turning this on opens Permissions so you can allow it."
                 },
@@ -857,6 +897,7 @@ private fun WakeDotSizeSliderRow(
     }
 }
 
+@Composable
 private fun wakeStatusUi(wakeOn: Boolean, micGranted: Boolean, state: WakeState): Triple<String, String, Color> = when {
     !micGranted -> Triple("Permission off", "Microphone permission is off. Manage in Settings → Permissions.", AmberWarning)
     !wakeOn -> Triple("Off", "Turn on wake word above to listen hands-free.", SlateMuted)

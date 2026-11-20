@@ -13,12 +13,13 @@ class PlayStoreMatcherTest {
         val elements = listOf(
             ScreenElement(1, "text", "LastWave Music", ""),
             ScreenElement(2, "text", "Shilex Audio Labs", ""),
-            ScreenElement(3, "button", "Install", ""),
+            ScreenElement(3, "text", "About this app", ""),
+            ScreenElement(4, "button", "Install", ""),
         )
         val decision = PlayStoreMatcher.analyzeScreen("LastWave", elements)
         assertEquals(PlayStoreMatcher.ButtonState.Install, decision.buttonState)
         assertNotNull(decision.actionElement)
-        assertEquals(3, decision.actionElement?.number)
+        assertEquals(4, decision.actionElement?.number)
     }
 
     @Test
@@ -70,11 +71,12 @@ class PlayStoreMatcherTest {
     fun handlesFreeInstallVariantPlayOpenStateAndWaitingPending() {
         val freeInstall = listOf(
             ScreenElement(1, "text", "WhatsApp Messenger", ""),
-            ScreenElement(2, "button", "Install (free)", ""),
+            ScreenElement(2, "text", "About this app", ""),
+            ScreenElement(3, "button", "Install (free)", ""),
         )
         val d1 = PlayStoreMatcher.analyzeScreen("WhatsApp", freeInstall)
         assertEquals(PlayStoreMatcher.ButtonState.Install, d1.buttonState)
-        assertEquals(2, d1.actionElement?.number)
+        assertEquals(3, d1.actionElement?.number)
 
         val playInstalled = listOf(
             ScreenElement(1, "text", "Subway Surfers", ""),
@@ -119,7 +121,8 @@ class PlayStoreMatcherTest {
             "Signal",
             listOf(
                 ScreenElement(1, "text", "Signal Private Messenger", ""),
-                ScreenElement(2, "button", "Install", ""),
+                ScreenElement(2, "text", "About this app", ""),
+                ScreenElement(3, "button", "Install", ""),
             ),
         )
         assertEquals(
@@ -153,9 +156,10 @@ class PlayStoreMatcherTest {
     fun detectsScreenStatesAndPreventsRepeatedSearchWhenResultsVisible() {
         val searchResultsElements = listOf(
             ScreenElement(1, "button", "Search apps & games", ""),
-            ScreenElement(2, "text", "BookMyShow: Movie Tickets", ""),
-            ScreenElement(3, "text", "Bigtree Entertainment", ""),
-            ScreenElement(4, "button", "Install", ""),
+            ScreenElement(2, "text", "Search results", ""),
+            ScreenElement(3, "text", "BookMyShow: Movie Tickets", ""),
+            ScreenElement(4, "text", "Bigtree Entertainment", ""),
+            ScreenElement(5, "button", "Install", ""),
         )
         assertEquals(
             PlayStoreMatcher.PlayStoreScreenState.SearchResults,
@@ -174,9 +178,81 @@ class PlayStoreMatcherTest {
         )
         assertTrue(PlayStoreMatcher.isResultsVisible(appDetailsElements))
 
-        // Match base title "BookMyShow" when subtitle is present
+        // A search result's Install button is not tapped. JARVIS opens the exact result first.
         val decision = PlayStoreMatcher.analyzeScreen("BookMyShow", searchResultsElements)
-        assertEquals(PlayStoreMatcher.ButtonState.Install, decision.buttonState)
-        assertNotNull(decision.actionElement)
+        assertEquals(PlayStoreMatcher.ButtonState.None, decision.buttonState)
+        assertEquals(3, decision.matchedListingElement?.number)
+        assertEquals("Open the matching listing and verify its details before installing.", decision.reason)
+    }
+
+    @Test
+    fun searchIsNeverSubmittedTwiceOrOnVisibleResults() {
+        val home = PlayStoreMatcher.PlayStoreScreenState.HomeScreen
+        assertTrue(PlayStoreMatcher.canSubmitSearch(false, false, home, attempts = 0))
+        assertEquals(false, PlayStoreMatcher.canSubmitSearch(true, false, home, attempts = 0))
+        assertEquals(false, PlayStoreMatcher.canSubmitSearch(false, true, home, attempts = 0))
+        assertEquals(false, PlayStoreMatcher.canSubmitSearch(false, false, home, attempts = 1))
+        assertEquals(
+            false,
+            PlayStoreMatcher.canSubmitSearch(false, false, PlayStoreMatcher.PlayStoreScreenState.AppDetails, attempts = 0),
+        )
+    }
+
+    @Test
+    fun repeatedStateStopsOnlyAfterAnActionWasAttempted() {
+        val noResult = PlayStoreMatcher.ScreenDecision(PlayStoreMatcher.ButtonState.None)
+        val ambiguous = PlayStoreMatcher.ScreenDecision(
+            buttonState = PlayStoreMatcher.ButtonState.None,
+            ambiguousListings = listOf(
+                ScreenElement(1, "button", "Free Fire", ""),
+                ScreenElement(2, "button", "Free Fire", ""),
+            ),
+        )
+        assertEquals(false, PlayStoreMatcher.shouldStopAfterRepeatedFailure(8, false, false, noResult))
+        assertEquals(false, PlayStoreMatcher.shouldStopAfterRepeatedFailure(3, true, false, noResult))
+        assertTrue(PlayStoreMatcher.shouldStopAfterRepeatedFailure(4, true, false, noResult))
+        assertEquals(false, PlayStoreMatcher.shouldStopAfterRepeatedFailure(4, true, false, ambiguous))
+        assertEquals(false, PlayStoreMatcher.shouldStopAfterRepeatedFailure(8, true, true, noResult))
+    }
+
+    @Test
+    fun ordinaryPlayStoreHomeRecommendationsAreNotMistakenForSearchResults() {
+        val home = listOf(
+            ScreenElement(1, "button", "Search apps & games", ""),
+            ScreenElement(2, "text", "Recommended for you", ""),
+            ScreenElement(3, "button", "YouTube", ""),
+            ScreenElement(4, "button", "Maps", ""),
+        )
+        assertEquals(PlayStoreMatcher.PlayStoreScreenState.HomeScreen, PlayStoreMatcher.detectScreenState(home))
+        assertEquals(false, PlayStoreMatcher.isResultsVisible(home))
+        val requestedAppVisible = home + ScreenElement(5, "button", "Free Fire India", "")
+        assertTrue(PlayStoreMatcher.isResultsVisible(requestedAppVisible, "Free Fire India"))
+    }
+
+    @Test
+    fun sponsoredSearchResultsRequireUserChoice() {
+        val elements = listOf(
+            ScreenElement(1, "text", "Sponsored", ""),
+            ScreenElement(2, "text", "Free Fire India", ""),
+            ScreenElement(3, "text", "Garena International", ""),
+            ScreenElement(4, "button", "Install", ""),
+        )
+        val decision = PlayStoreMatcher.analyzeScreen("Free Fire India", elements)
+        assertEquals(PlayStoreMatcher.ButtonState.None, decision.buttonState)
+        assertTrue(decision.requiresUserChoice)
+        assertTrue(decision.reason.contains("sponsored"))
+    }
+
+    @Test
+    fun recognizesHindiPlayStoreSearchAndDetailsLabels() {
+        val searchButton = ScreenElement(1, "button", "ऐप्लिकेशन और गेम खोजें", "")
+        assertEquals(searchButton, PlayStoreMatcher.findSearchInput(listOf(searchButton)))
+        val detail = listOf(
+            ScreenElement(1, "text", "Free Fire India", ""),
+            ScreenElement(2, "text", "इस गेम के बारे में", ""),
+            ScreenElement(3, "button", "इंस्टॉल करें", ""),
+        )
+        assertEquals(PlayStoreMatcher.PlayStoreScreenState.AppDetails, PlayStoreMatcher.detectScreenState(detail))
+        assertEquals(PlayStoreMatcher.ButtonState.Install, PlayStoreMatcher.analyzeScreen("Free Fire India", detail).buttonState)
     }
 }

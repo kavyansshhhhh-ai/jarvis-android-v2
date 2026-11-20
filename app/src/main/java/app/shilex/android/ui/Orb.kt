@@ -46,7 +46,7 @@ fun Orb(phase: Phase, modifier: Modifier = Modifier, level: Float = 0f) {
     val energy by animateFloatAsState(
         when (phase) {
             Phase.Off -> 0.05f
-            Phase.Connecting -> 0.35f
+            Phase.Connecting, Phase.Processing -> 0.35f
             Phase.Listening -> 0.55f
             Phase.Speaking -> 0.95f
         },
@@ -178,7 +178,7 @@ fun Orb(phase: Phase, modifier: Modifier = Modifier, level: Float = 0f) {
         )
 
         // 5. Thinking / Connecting Dual Orbital Rings
-        if (phase == Phase.Connecting) {
+        if (phase == Phase.Connecting || phase == Phase.Processing) {
             val ring1 = base * 1.34f
             val ring2 = base * 1.48f
 

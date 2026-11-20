@@ -99,6 +99,8 @@ fun AnimatedVoiceIndicatorDot(
         VoiceIndicatorState.LISTENING, VoiceIndicatorState.INTERRUPTED -> 0.55f
         else -> 0f
     }
+    val cyanAccent = ElectricCyan
+    val violetAccent = NeonViolet
 
     Canvas(modifier = modifier.size(24.dp)) {
         val c = center
@@ -110,8 +112,8 @@ fun AnimatedVoiceIndicatorDot(
         drawCircle(
             brush = Brush.radialGradient(
                 colors = listOf(
-                    ElectricCyan.copy(alpha = 0.65f * animatedAlpha * glowAlphaMultiplier),
-                    NeonViolet.copy(alpha = 0.35f * animatedAlpha * glowAlphaMultiplier),
+                    cyanAccent.copy(alpha = 0.65f * animatedAlpha * glowAlphaMultiplier),
+                    violetAccent.copy(alpha = 0.35f * animatedAlpha * glowAlphaMultiplier),
                     Color.Transparent,
                 ),
                 center = c,
@@ -126,8 +128,8 @@ fun AnimatedVoiceIndicatorDot(
             brush = Brush.radialGradient(
                 colors = listOf(
                     Color.White.copy(alpha = 0.98f * animatedAlpha),
-                    ElectricCyan.copy(alpha = 0.95f * animatedAlpha),
-                    NeonViolet.copy(alpha = 0.80f * animatedAlpha),
+                    cyanAccent.copy(alpha = 0.95f * animatedAlpha),
+                    violetAccent.copy(alpha = 0.80f * animatedAlpha),
                 ),
                 center = Offset(c.x - coreRadius * 0.22f, c.y - coreRadius * 0.22f),
                 radius = coreRadius * 1.25f,

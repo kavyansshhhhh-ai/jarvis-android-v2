@@ -103,9 +103,8 @@ data class BundledHindiVoice(
  * Every voice is backed by a distinct genuine trained speaker / model with verified gender metadata;
  * zero pitch-shifted clones or guessed genders.
  *
- * Total bundled genuine offline neural Hindi voices (5 Female + 5 Male = 10):
- * - 5 Female: Priyamvada (Piper/AI4Bharat), hf_alpha (Kokoro), hf_beta (Kokoro), F1 (Supertonic-3), F2 (Supertonic-3)
- * - 5 Male: Pratham (Piper/AI4Bharat), Rohan (Piper/IndicTTS), hm_omega (Kokoro), hm_psi (Kokoro), M1 (Supertonic-3)
+ * Ten bundled Supertonic-3 Hindi/English voices. The style IDs are distinct trained styles:
+ * female F1-F5 use speaker IDs 0-4; male M1-M5 use speaker IDs 5-9.
  */
 object BundledHindiVoices {
     const val ESPEAK_DATA_ASSET_DIR = "voices/espeak-ng-data"
@@ -127,195 +126,70 @@ object BundledHindiVoices {
     private const val SUPERTONIC_INDEXER = "voices/supertonic/unicode_indexer.bin"
     private const val SUPERTONIC_VOICE_STYLE = "voices/supertonic/voice.bin"
 
-    val PRIYAMVADA = BundledHindiVoice(
-        id = "bundled_hi_female_priyamvada",
-        displayName = "Hindi Female 1",
-        gender = VoiceGender.Female,
-        engineKind = BundledEngineKind.PiperVits,
-        modelAssetPath = "voices/piper/priyamvada/hi_IN-priyamvada-medium.onnx",
-        tokensAssetPath = "voices/piper/priyamvada/tokens.txt",
-        configAssetPath = "voices/piper/priyamvada/hi_IN-priyamvada-medium.onnx.json",
-        sampleRate = 22050,
-        licenseNotice = "CC BY-NC-SA 4.0",
-        datasetSource = "AI4Bharat IndicNLP Hindi Female (Piper VITS int8)",
-    )
+    private fun supertonicVoice(style: String, gender: VoiceGender, speakerId: Int): BundledHindiVoice =
+        BundledHindiVoice(
+            id = "bundled_hi_${gender.label.lowercase()}_supertonic_${style.lowercase()}",
+            displayName = "Hindi ${gender.label} ${if (gender == VoiceGender.Female) speakerId + 1 else speakerId - 4}",
+            gender = gender,
+            engineKind = BundledEngineKind.Supertonic,
+            modelAssetPath = SUPERTONIC_VOCODER,
+            tokensAssetPath = SUPERTONIC_INDEXER,
+            configAssetPath = SUPERTONIC_TTS_JSON,
+            voicesAssetPath = SUPERTONIC_VOICE_STYLE,
+            durationPredictorAssetPath = SUPERTONIC_DURATION,
+            textEncoderAssetPath = SUPERTONIC_TEXT_ENCODER,
+            vectorEstimatorAssetPath = SUPERTONIC_VECTOR_ESTIMATOR,
+            vocoderAssetPath = SUPERTONIC_VOCODER,
+            ttsJsonAssetPath = SUPERTONIC_TTS_JSON,
+            unicodeIndexerAssetPath = SUPERTONIC_INDEXER,
+            voiceStyleAssetPath = SUPERTONIC_VOICE_STYLE,
+            speakerId = speakerId,
+            lang = "hi",
+            sampleRate = 24000,
+            licenseNotice = "OpenRAIL-M",
+            datasetSource = "Supertone Supertonic-3 multilingual ${gender.label} style $style (sid $speakerId)",
+        )
 
-    val HF_ALPHA = BundledHindiVoice(
-        id = "bundled_hi_female_kokoro_alpha",
-        displayName = "Hindi Female 2",
-        gender = VoiceGender.Female,
-        engineKind = BundledEngineKind.KokoroMultiLang,
-        modelAssetPath = "voices/kokoro/model.int8.onnx",
-        tokensAssetPath = "voices/kokoro/tokens.txt",
-        configAssetPath = "voices/kokoro/tokens.txt",
-        voicesAssetPath = "voices/kokoro/voices.bin",
-        speakerId = 31,
-        lang = "hi",
-        sampleRate = 24000,
-        licenseNotice = "Apache-2.0",
-        datasetSource = "Kokoro-82M Hindi Female hf_alpha (sid 31)",
-    )
+    val SUPERTONIC_F1 = supertonicVoice("F1", VoiceGender.Female, 0)
+    val SUPERTONIC_F2 = supertonicVoice("F2", VoiceGender.Female, 1)
+    val SUPERTONIC_F3 = supertonicVoice("F3", VoiceGender.Female, 2)
+    val SUPERTONIC_F4 = supertonicVoice("F4", VoiceGender.Female, 3)
+    val SUPERTONIC_F5 = supertonicVoice("F5", VoiceGender.Female, 4)
+    val SUPERTONIC_M1 = supertonicVoice("M1", VoiceGender.Male, 5)
+    val SUPERTONIC_M2 = supertonicVoice("M2", VoiceGender.Male, 6)
+    val SUPERTONIC_M3 = supertonicVoice("M3", VoiceGender.Male, 7)
+    val SUPERTONIC_M4 = supertonicVoice("M4", VoiceGender.Male, 8)
+    val SUPERTONIC_M5 = supertonicVoice("M5", VoiceGender.Male, 9)
 
-    val HF_BETA = BundledHindiVoice(
-        id = "bundled_hi_female_kokoro_beta",
-        displayName = "Hindi Female 3",
-        gender = VoiceGender.Female,
-        engineKind = BundledEngineKind.KokoroMultiLang,
-        modelAssetPath = "voices/kokoro/model.int8.onnx",
-        tokensAssetPath = "voices/kokoro/tokens.txt",
-        configAssetPath = "voices/kokoro/tokens.txt",
-        voicesAssetPath = "voices/kokoro/voices.bin",
-        speakerId = 32,
-        lang = "hi",
-        sampleRate = 24000,
-        licenseNotice = "Apache-2.0",
-        datasetSource = "Kokoro-82M Hindi Female hf_beta (sid 32)",
-    )
-
-    val SUPERTONIC_F1 = BundledHindiVoice(
-        id = "bundled_hi_female_supertonic_f1",
-        displayName = "Hindi Female 4",
-        gender = VoiceGender.Female,
-        engineKind = BundledEngineKind.Supertonic,
-        modelAssetPath = SUPERTONIC_VOCODER,
-        tokensAssetPath = SUPERTONIC_INDEXER,
-        configAssetPath = SUPERTONIC_TTS_JSON,
-        voicesAssetPath = SUPERTONIC_VOICE_STYLE,
-        durationPredictorAssetPath = SUPERTONIC_DURATION,
-        textEncoderAssetPath = SUPERTONIC_TEXT_ENCODER,
-        vectorEstimatorAssetPath = SUPERTONIC_VECTOR_ESTIMATOR,
-        vocoderAssetPath = SUPERTONIC_VOCODER,
-        ttsJsonAssetPath = SUPERTONIC_TTS_JSON,
-        unicodeIndexerAssetPath = SUPERTONIC_INDEXER,
-        voiceStyleAssetPath = SUPERTONIC_VOICE_STYLE,
-        speakerId = 0,
-        lang = "hi",
-        sampleRate = 44100,
-        licenseNotice = "MIT",
-        datasetSource = "Supertone Supertonic-3 Multilingual Hindi Female F1 (sid 0)",
-    )
-
-    val SUPERTONIC_F2 = BundledHindiVoice(
-        id = "bundled_hi_female_supertonic_f2",
-        displayName = "Hindi Female 5",
-        gender = VoiceGender.Female,
-        engineKind = BundledEngineKind.Supertonic,
-        modelAssetPath = SUPERTONIC_VOCODER,
-        tokensAssetPath = SUPERTONIC_INDEXER,
-        configAssetPath = SUPERTONIC_TTS_JSON,
-        voicesAssetPath = SUPERTONIC_VOICE_STYLE,
-        durationPredictorAssetPath = SUPERTONIC_DURATION,
-        textEncoderAssetPath = SUPERTONIC_TEXT_ENCODER,
-        vectorEstimatorAssetPath = SUPERTONIC_VECTOR_ESTIMATOR,
-        vocoderAssetPath = SUPERTONIC_VOCODER,
-        ttsJsonAssetPath = SUPERTONIC_TTS_JSON,
-        unicodeIndexerAssetPath = SUPERTONIC_INDEXER,
-        voiceStyleAssetPath = SUPERTONIC_VOICE_STYLE,
-        speakerId = 1,
-        lang = "hi",
-        sampleRate = 44100,
-        licenseNotice = "MIT",
-        datasetSource = "Supertone Supertonic-3 Multilingual Hindi Female F2 (sid 1)",
-    )
-
-    val PRATHAM = BundledHindiVoice(
-        id = "bundled_hi_male_pratham",
-        displayName = "Hindi Male 1",
-        gender = VoiceGender.Male,
-        engineKind = BundledEngineKind.PiperVits,
-        modelAssetPath = "voices/piper/pratham/hi_IN-pratham-medium.onnx",
-        tokensAssetPath = "voices/piper/pratham/tokens.txt",
-        configAssetPath = "voices/piper/pratham/hi_IN-pratham-medium.onnx.json",
-        sampleRate = 22050,
-        licenseNotice = "CC BY-NC-SA 4.0",
-        datasetSource = "AI4Bharat IndicNLP Hindi Male (Piper VITS int8)",
-    )
-
-    val ROHAN = BundledHindiVoice(
-        id = "bundled_hi_male_rohan",
-        displayName = "Hindi Male 2",
-        gender = VoiceGender.Male,
-        engineKind = BundledEngineKind.PiperVits,
-        modelAssetPath = "voices/piper/rohan/hi_IN-rohan-medium.onnx",
-        tokensAssetPath = "voices/piper/rohan/tokens.txt",
-        configAssetPath = "voices/piper/rohan/hi_IN-rohan-medium.onnx.json",
-        sampleRate = 22050,
-        licenseNotice = "IIT Madras IndicTTS License",
-        datasetSource = "IIT Madras IndicTTS Hindi Male (Piper VITS int8)",
-    )
-
-    val HM_OMEGA = BundledHindiVoice(
-        id = "bundled_hi_male_kokoro_omega",
-        displayName = "Hindi Male 3",
-        gender = VoiceGender.Male,
-        engineKind = BundledEngineKind.KokoroMultiLang,
-        modelAssetPath = "voices/kokoro/model.int8.onnx",
-        tokensAssetPath = "voices/kokoro/tokens.txt",
-        configAssetPath = "voices/kokoro/tokens.txt",
-        voicesAssetPath = "voices/kokoro/voices.bin",
-        speakerId = 33,
-        lang = "hi",
-        sampleRate = 24000,
-        licenseNotice = "Apache-2.0",
-        datasetSource = "Kokoro-82M Hindi Male hm_omega (sid 33)",
-    )
-
-    val HM_PSI = BundledHindiVoice(
-        id = "bundled_hi_male_kokoro_psi",
-        displayName = "Hindi Male 4",
-        gender = VoiceGender.Male,
-        engineKind = BundledEngineKind.KokoroMultiLang,
-        modelAssetPath = "voices/kokoro/model.int8.onnx",
-        tokensAssetPath = "voices/kokoro/tokens.txt",
-        configAssetPath = "voices/kokoro/tokens.txt",
-        voicesAssetPath = "voices/kokoro/voices.bin",
-        speakerId = 34,
-        lang = "hi",
-        sampleRate = 24000,
-        licenseNotice = "Apache-2.0",
-        datasetSource = "Kokoro-82M Hindi Male hm_psi (sid 34)",
-    )
-
-    val SUPERTONIC_M1 = BundledHindiVoice(
-        id = "bundled_hi_male_supertonic_m1",
-        displayName = "Hindi Male 5",
-        gender = VoiceGender.Male,
-        engineKind = BundledEngineKind.Supertonic,
-        modelAssetPath = SUPERTONIC_VOCODER,
-        tokensAssetPath = SUPERTONIC_INDEXER,
-        configAssetPath = SUPERTONIC_TTS_JSON,
-        voicesAssetPath = SUPERTONIC_VOICE_STYLE,
-        durationPredictorAssetPath = SUPERTONIC_DURATION,
-        textEncoderAssetPath = SUPERTONIC_TEXT_ENCODER,
-        vectorEstimatorAssetPath = SUPERTONIC_VECTOR_ESTIMATOR,
-        vocoderAssetPath = SUPERTONIC_VOCODER,
-        ttsJsonAssetPath = SUPERTONIC_TTS_JSON,
-        unicodeIndexerAssetPath = SUPERTONIC_INDEXER,
-        voiceStyleAssetPath = SUPERTONIC_VOICE_STYLE,
-        speakerId = 5,
-        lang = "hi",
-        sampleRate = 44100,
-        licenseNotice = "MIT",
-        datasetSource = "Supertone Supertonic-3 Multilingual Hindi Male M1 (sid 5)",
-    )
+    // Preserve source compatibility for callers of the former catalog constants.
+    val PRIYAMVADA get() = SUPERTONIC_F1
+    val HF_ALPHA get() = SUPERTONIC_F2
+    val HF_BETA get() = SUPERTONIC_F3
+    val PRATHAM get() = SUPERTONIC_M1
+    val ROHAN get() = SUPERTONIC_M2
+    val HM_OMEGA get() = SUPERTONIC_M3
+    val HM_PSI get() = SUPERTONIC_M4
 
     val ALL: List<BundledHindiVoice> = listOf(
-        PRIYAMVADA,
-        HF_ALPHA,
-        HF_BETA,
-        SUPERTONIC_F1,
-        SUPERTONIC_F2,
-        PRATHAM,
-        ROHAN,
-        HM_OMEGA,
-        HM_PSI,
-        SUPERTONIC_M1,
+        SUPERTONIC_F1, SUPERTONIC_F2, SUPERTONIC_F3, SUPERTONIC_F4, SUPERTONIC_F5,
+        SUPERTONIC_M1, SUPERTONIC_M2, SUPERTONIC_M3, SUPERTONIC_M4, SUPERTONIC_M5,
     )
 
     /** True: in-app Sherpa-ONNX offline neural TTS runtime is integrated and reads bundled APK assets. */
     const val IS_OFFLINE_SYNTHESIS_INTEGRATED = true
 
-    fun find(voiceId: String?): BundledHindiVoice? = ALL.firstOrNull { it.id == voiceId }
+    private val LEGACY_VOICE_IDS = mapOf(
+        "bundled_hi_female_priyamvada" to SUPERTONIC_F1,
+        "bundled_hi_female_kokoro_alpha" to SUPERTONIC_F2,
+        "bundled_hi_female_kokoro_beta" to SUPERTONIC_F3,
+        "bundled_hi_male_pratham" to SUPERTONIC_M1,
+        "bundled_hi_male_rohan" to SUPERTONIC_M2,
+        "bundled_hi_male_kokoro_omega" to SUPERTONIC_M3,
+        "bundled_hi_male_kokoro_psi" to SUPERTONIC_M4,
+    )
+
+    fun find(voiceId: String?): BundledHindiVoice? =
+        ALL.firstOrNull { it.id == voiceId } ?: LEGACY_VOICE_IDS[voiceId]
 
     fun validateCatalog(voices: List<BundledHindiVoice> = ALL): VoiceValidationResult {
         if (voices.isEmpty()) return VoiceValidationResult(false, "Bundled voice catalog is empty.")
@@ -626,8 +500,9 @@ object VoiceClassifier {
     ): String? {
         val all = catalog.femaleVoices + catalog.maleVoices
         if (all.isEmpty()) return savedVoiceId
-        if (!savedVoiceId.isNullOrBlank() && all.any { it.id == savedVoiceId }) {
-            return savedVoiceId
+        val migratedVoiceId = BundledHindiVoices.find(savedVoiceId)?.id ?: savedVoiceId
+        if (!migratedVoiceId.isNullOrBlank() && all.any { it.id == migratedVoiceId }) {
+            return migratedVoiceId
         }
         val preferredList = if (preferMale) catalog.maleVoices else catalog.femaleVoices
         return preferredList.firstOrNull { it.isBundled || it.isInstalled }?.id

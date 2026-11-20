@@ -297,6 +297,8 @@ private fun FloatingLiquidGlassDock(
     val lensShape = remember { RoundedCornerShape(28.dp) }
     val haptic = LocalHapticFeedback.current
     val coroutineScope = rememberCoroutineScope()
+    val cyanAccent = ElectricCyan
+    val violetAccent = NeonViolet
 
     val rimBrush = remember {
         Brush.verticalGradient(
@@ -323,20 +325,20 @@ private fun FloatingLiquidGlassDock(
             ),
         )
     }
-    val lensRadialIdleBrush = remember {
+    val lensRadialIdleBrush = remember(cyanAccent, violetAccent) {
         Brush.radialGradient(
             listOf(
-                ElectricCyan.copy(alpha = 0.14f),
-                NeonViolet.copy(alpha = 0.08f),
+                cyanAccent.copy(alpha = 0.14f),
+                violetAccent.copy(alpha = 0.08f),
                 Color.Transparent,
             ),
         )
     }
-    val lensRadialActiveBrush = remember {
+    val lensRadialActiveBrush = remember(cyanAccent, violetAccent) {
         Brush.radialGradient(
             listOf(
-                ElectricCyan.copy(alpha = 0.24f),
-                NeonViolet.copy(alpha = 0.10f),
+                cyanAccent.copy(alpha = 0.24f),
+                violetAccent.copy(alpha = 0.10f),
                 Color.Transparent,
             ),
         )

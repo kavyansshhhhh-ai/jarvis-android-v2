@@ -361,7 +361,11 @@ object MediaTools {
                 val snap = service.snapshot()
                 if (snap != null && snap.packageName == pkg) {
                     // Collapse full-screen currently playing sheet once if hiding search/results
-                    if (!collapsedPlayer && service.findFirst { "audio_video_switch_toggle" in it.viewIdResourceName.orEmpty() } != null) {
+                    val playerToggle = if (!collapsedPlayer) service.findFirst {
+                        "audio_video_switch_toggle" in it.viewIdResourceName.orEmpty()
+                    } else null
+                    if (playerToggle != null) {
+                        service.releaseNode(playerToggle)
                         collapsedPlayer = true
                         service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK)
                         delay(700)
@@ -372,12 +376,16 @@ object MediaTools {
                     if (!typedSearch) {
                         val searchFieldNum = MusicTrackMatcher.findSearchFieldNumber(snap.elements, snap.meta)
                         val node = searchFieldNum?.let(service::node)
-                        if (node != null && node.isEditable) {
-                            val searchText = listOf(wantedTitle, wantedArtist).filter { it.isNotBlank() }.joinToString(" ")
-                            if (service.type(node, searchText)) {
-                                typedSearch = true
-                                delay(900)
-                                return@repeat
+                        if (node != null) {
+                            if (node.isEditable) {
+                                val searchText = listOf(wantedTitle, wantedArtist).filter { it.isNotBlank() }.joinToString(" ")
+                                if (service.type(node, searchText)) {
+                                    typedSearch = true
+                                    delay(900)
+                                    return@repeat
+                                }
+                            } else {
+                                service.releaseNode(node)
                             }
                         } else {
                             // Try tapping Search icon/tab first to reveal the input field

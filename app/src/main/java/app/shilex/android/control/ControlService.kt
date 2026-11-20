@@ -49,8 +49,8 @@ class ControlService : AccessibilityService() {
         data class Unavailable(val reason: String) : ScreenshotCapture
     }
 
-    // Numbers from the last ui_read, so "tap 4" means what the model just saw.
-    @Volatile private var lastNodes: Map<Int, AccessibilityNodeInfo> = emptyMap()
+    // Numbered metadata from the last ui_read; AccessibilityNodeInfo instances are never cached
+    // across screen snapshots because they become stale and retain the view hierarchy.
     @Volatile private var lastMeta: Map<Int, NodeMeta> = emptyMap()
     @Volatile private var lastElementsList: List<ScreenElement> = emptyList()
 
@@ -59,12 +59,21 @@ class ControlService : AccessibilityService() {
         Diag.i("control: on")
     }
 
-    override fun onAccessibilityEvent(event: AccessibilityEvent?) = Unit
+    override fun onAccessibilityEvent(event: AccessibilityEvent?) {
+        when (event?.eventType) {
+            AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED,
+            AccessibilityEvent.TYPE_WINDOWS_CHANGED,
+            AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED,
+            -> app.shilex.android.orb.FloatingOrb.sync(this)
+        }
+    }
 
     override fun onInterrupt() = Unit
 
     override fun onDestroy() {
         if (instance === this) instance = null
+        lastMeta = emptyMap()
+        lastElementsList = emptyList()
         if (overlayLazy.isInitialized()) overlay.hideAll()
         Diag.i("control: off")
         super.onDestroy()
@@ -97,20 +106,57 @@ class ControlService : AccessibilityService() {
 
     fun lastMetadata(): Map<Int, NodeMeta> = lastMeta
 
-    fun foregroundPackage(): String = activeRoot()?.packageName?.toString().orEmpty()
+    fun foregroundPackage(): String {
+        val root = activeRoot() ?: return ""
+        return try {
+            root.packageName?.toString().orEmpty()
+        } finally {
+            recycleNode(root)
+        }
+    }
 
     /** Finds the primary active non-JARVIS application or dialog root across windows. */
     private fun activeRoot(): AccessibilityNodeInfo? {
         val root = rootInActiveWindow
         val rootPkg = root?.packageName?.toString().orEmpty()
-        val appWindows = runCatching {
-            windows.filter { win ->
-                win.type == android.view.accessibility.AccessibilityWindowInfo.TYPE_APPLICATION &&
-                    win.root?.packageName?.toString()?.let { it.isNotEmpty() && it != packageName } == true
-            }.sortedByDescending { it.layer }
-        }.getOrDefault(emptyList())
-        if (root != null && rootPkg.isNotEmpty() && rootPkg != packageName) return root
-        return appWindows.firstOrNull()?.root ?: root
+        val visibleWindows = runCatching { windows.sortedByDescending { it.layer } }.getOrDefault(emptyList())
+        val activeWindowType = visibleWindows.firstOrNull { win ->
+            windowRootPackage(win) == rootPkg
+        }?.type
+        val appWindows = visibleWindows.filter { win ->
+            win.type == android.view.accessibility.AccessibilityWindowInfo.TYPE_APPLICATION &&
+                windowRootPackage(win)?.let { it.isNotEmpty() && it != packageName } == true
+        }
+        val useActiveRoot = root != null && AccessibilityActionPolicy.shouldUseActiveRoot(
+                rootPackage = rootPkg,
+                ownPackage = packageName,
+                isInputMethodWindow = activeWindowType == android.view.accessibility.AccessibilityWindowInfo.TYPE_INPUT_METHOD,
+            )
+        val selected = when {
+            useActiveRoot -> root
+            appWindows.isNotEmpty() -> appWindows.first().root
+            activeWindowType == android.view.accessibility.AccessibilityWindowInfo.TYPE_INPUT_METHOD -> null
+            else -> root
+        }
+        visibleWindows.forEach(::recycleWindow)
+        if (root != null && selected !== root) recycleNode(root)
+        return selected
+    }
+
+    private fun windowRootPackage(window: android.view.accessibility.AccessibilityWindowInfo): String? {
+        val root = runCatching { window.root }.getOrNull() ?: return null
+        return try {
+            root.packageName?.toString()
+        } finally {
+            recycleNode(root)
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun recycleWindow(window: android.view.accessibility.AccessibilityWindowInfo) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+            runCatching { window.recycle() }
+        }
     }
 
     /** True when any visible app window shows a password, PIN, MPIN, OTP, or CVV prompt/field. */
@@ -118,20 +164,27 @@ class ControlService : AccessibilityService() {
         val root = activeRoot() ?: return false
         fun visit(node: AccessibilityNodeInfo): Boolean {
             if (!node.isVisibleToUser) return false
-            if (isNodeDataSensitive(node)) return false
+            if (isNodeDataSensitive(node)) return true
             val viewId = node.viewIdResourceName?.substringAfterLast('/').orEmpty()
             if (node.isPassword || ControlRules.isSensitiveAuthCue(ownLabel(node), viewId, node.isPassword)) return true
-            for (i in 0 until node.childCount) {
-                if (node.getChild(i)?.let(::visit) == true) return true
-            }
-            return false
+            return visitChildren(node, visit = ::visit)
         }
-        return visit(root)
+        return try {
+            visit(root)
+        } finally {
+            recycleNode(root)
+        }
     }
 
     /** Reads the app in front. Blocked apps, sensitive PIN/OTP/password screens, and system-restricted nodes come back without contents. */
     fun snapshot(allowPlayStore: Boolean = false): Snapshot? {
-        val root = activeRoot() ?: return null
+        val root = activeRoot()
+        if (root == null) {
+            lastMeta = emptyMap()
+            lastElementsList = emptyList()
+            return null
+        }
+        try {
         val pkg = root.packageName?.toString().orEmpty()
         val label = runCatching {
             packageManager.getApplicationLabel(packageManager.getApplicationInfo(pkg, 0)).toString()
@@ -140,20 +193,17 @@ class ControlService : AccessibilityService() {
         val screenW = dm?.widthPixels ?: 0
         val screenH = dm?.heightPixels ?: 0
         if (ControlRules.blocked(pkg, allowPlayStoreAutomation = allowPlayStore)) {
-            lastNodes = emptyMap()
             lastMeta = emptyMap()
             lastElementsList = emptyList()
             return Snapshot(pkg, label, emptyList(), false, allowPlayStore = allowPlayStore, screenWidthPx = screenW, screenHeightPx = screenH)
         }
         if (isNodeDataSensitive(root)) {
-            lastNodes = emptyMap()
             lastMeta = emptyMap()
             lastElementsList = emptyList()
             return Snapshot(pkg, label, emptyList(), false, restrictedBySystem = true, allowPlayStore = allowPlayStore, screenWidthPx = screenW, screenHeightPx = screenH)
         }
         val elements = mutableListOf<ScreenElement>()
         val assistantElements = mutableListOf<AssistantScreenElement>()
-        val nodes = mutableMapOf<Int, AccessibilityNodeInfo>()
         val metaMap = mutableMapOf<Int, NodeMeta>()
         var more = false
         var sensitiveAuth = false
@@ -222,7 +272,6 @@ class ControlService : AccessibilityService() {
                         isSelected = node.isSelected,
                         hint = hint,
                     )
-                    nodes[number] = node
                     metaMap[number] = NodeMeta(
                         number = number,
                         viewId = rawViewId,
@@ -240,19 +289,17 @@ class ControlService : AccessibilityService() {
                     )
                 }
             }
-            for (i in 0 until node.childCount) {
-                node.getChild(i)?.let { visit(it, insideTappable || tappable) }
-                if (sensitiveAuth) return
+            visitChildren(node) { child ->
+                visit(child, insideTappable || tappable)
+                sensitiveAuth
             }
         }
         visit(root, false)
         if (sensitiveAuth) {
-            lastNodes = emptyMap()
             lastMeta = emptyMap()
             lastElementsList = emptyList()
             return Snapshot(pkg, label, emptyList(), false, sensitiveAuth = true, allowPlayStore = allowPlayStore, screenWidthPx = screenW, screenHeightPx = screenH)
         }
-        lastNodes = nodes
         lastMeta = metaMap
         lastElementsList = elements.toList()
         val sig = "$pkg:${elements.size}:${elements.take(12).joinToString("|") { "${it.label}=${it.value}" }}"
@@ -275,27 +322,59 @@ class ControlService : AccessibilityService() {
             screenHeightPx = screenH,
             screenState = freshScreenState,
         )
+        } finally {
+            recycleNode(root)
+        }
     }
 
     private fun isNodeDataSensitive(node: AccessibilityNodeInfo): Boolean =
         Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE && node.isAccessibilityDataSensitive
 
-    /** Returns the cached node if still attached, else recovers a matching node by metadata on screen. */
-    fun node(number: Int): AccessibilityNodeInfo? {
-        val existing = lastNodes[number]
-        if (existing != null && runCatching { existing.refresh() }.getOrDefault(false) && existing.isVisibleToUser) {
-            return existing
+    private inline fun visitChildren(
+        node: AccessibilityNodeInfo,
+        reverse: Boolean = false,
+        visit: (AccessibilityNodeInfo) -> Boolean,
+    ): Boolean {
+        val indexes = if (reverse) (node.childCount - 1 downTo 0) else (0 until node.childCount)
+        for (index in indexes) {
+            val child = node.getChild(index) ?: continue
+            val finished = try {
+                visit(child)
+            } finally {
+                recycleNode(child)
+            }
+            if (finished) return true
         }
+        return false
+    }
+
+    @Suppress("DEPRECATION")
+    private fun recycleNode(node: AccessibilityNodeInfo) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+            runCatching { node.recycle() }
+        }
+    }
+
+    /** Releases a node returned by findFirst, findAll, node, focusedField, or nodeAt. */
+    fun releaseNode(node: AccessibilityNodeInfo) = recycleNode(node)
+
+    /** Resolves a fresh node from the current hierarchy using the last read's metadata. */
+    fun node(number: Int): AccessibilityNodeInfo? {
         val meta = lastMeta[number] ?: return null
         val recovered = recoverNode(meta)
         if (recovered != null) {
-            Diag.i("control: recovered stale node #$number (${meta.label})")
+            Diag.i("control: resolved current node #$number (${meta.label})")
         }
         return recovered
     }
 
     private fun recoverNode(meta: NodeMeta): AccessibilityNodeInfo? {
         val root = activeRoot() ?: return null
+        try {
+        if (!AccessibilityActionPolicy.belongsToCurrentPackage(meta.packageName, root.packageName?.toString().orEmpty())) {
+            Diag.w("control: refusing stale node #${meta.number} from ${meta.packageName} on ${root.packageName}")
+            return null
+        }
         var best: AccessibilityNodeInfo? = null
         var bestScore = 0
         val candidateRect = Rect()
@@ -319,24 +398,62 @@ class ControlService : AccessibilityService() {
             val s = score(n)
             if (s > bestScore && s >= 5) {
                 bestScore = s
-                best = n
+                best?.let(::recycleNode)
+                best = AccessibilityNodeInfo.obtain(n)
             }
-            for (i in 0 until n.childCount) n.getChild(i)?.let(::visit)
+            visitChildren(n) { child ->
+                visit(child)
+                false
+            }
         }
         visit(root)
         return best
+        } finally {
+            recycleNode(root)
+        }
     }
 
     /** The first visible node (screen order) that matches [test]. */
     fun findFirst(test: (AccessibilityNodeInfo) -> Boolean): AccessibilityNodeInfo? {
         val root = activeRoot() ?: return null
+        try {
         fun visit(node: AccessibilityNodeInfo): AccessibilityNodeInfo? {
             if (!node.isVisibleToUser || isNodeDataSensitive(node)) return null
-            if (test(node)) return node
-            for (i in 0 until node.childCount) node.getChild(i)?.let(::visit)?.let { return it }
-            return null
+            if (test(node)) return AccessibilityNodeInfo.obtain(node)
+            var found: AccessibilityNodeInfo? = null
+            visitChildren(node) { child ->
+                found = visit(child)
+                found != null
+            }
+            return found
         }
         return visit(root)
+        } finally {
+            recycleNode(root)
+        }
+    }
+
+    /** Returns owned copies of every matching visible node; callers must release each result. */
+    fun findAll(test: (AccessibilityNodeInfo) -> Boolean): List<AccessibilityNodeInfo> {
+        val root = activeRoot() ?: return emptyList()
+        val matches = mutableListOf<AccessibilityNodeInfo>()
+        try {
+            fun visit(node: AccessibilityNodeInfo) {
+                if (!node.isVisibleToUser || isNodeDataSensitive(node)) return
+                if (test(node)) matches += AccessibilityNodeInfo.obtain(node)
+                visitChildren(node) { child ->
+                    visit(child)
+                    false
+                }
+            }
+            visit(root)
+            return matches
+        } catch (t: Throwable) {
+            matches.forEach(::recycleNode)
+            throw t
+        } finally {
+            recycleNode(root)
+        }
     }
 
     fun labelOf(node: AccessibilityNodeInfo): String {
@@ -346,65 +463,126 @@ class ControlService : AccessibilityService() {
 
     fun click(node: AccessibilityNodeInfo): Boolean {
         var target: AccessibilityNodeInfo? = node
-        while (target != null && !target.isClickable) target = target.parent
-        if (target?.performAction(AccessibilityNodeInfo.ACTION_CLICK) == true) return true
-        val bounds = Rect().also(node::getBoundsInScreen)
-        if (bounds.isEmpty || bounds.width() <= 0 || bounds.height() <= 0) return false
-        return tap(bounds.exactCenterX(), bounds.exactCenterY())
+        var ownsTarget = false
+        try {
+            if (!AccessibilityActionPolicy.canClick(node.isVisibleToUser, node.isEnabled)) return false
+            while (target != null && !target.isClickable) {
+                val parent = target.parent
+                if (ownsTarget) target?.let(::recycleNode)
+                target = parent
+                ownsTarget = parent != null
+            }
+            if (target != null && !AccessibilityActionPolicy.canClick(target.isVisibleToUser, target.isEnabled)) return false
+            if (target?.performAction(AccessibilityNodeInfo.ACTION_CLICK) == true) return true
+            // If accessibility does not expose ACTION_CLICK, tap the resolved clickable parent,
+            // whose bounds cover the actual control, rather than the possibly tiny child label.
+            val bounds = Rect().also { target?.getBoundsInScreen(it) ?: node.getBoundsInScreen(it) }
+            if (bounds.isEmpty || bounds.width() <= 0 || bounds.height() <= 0) return false
+            return tap(bounds.exactCenterX(), bounds.exactCenterY())
+        } finally {
+            if (ownsTarget) target?.let(::recycleNode)
+            recycleNode(node)
+        }
     }
 
     fun longClick(node: AccessibilityNodeInfo): Boolean {
         var target: AccessibilityNodeInfo? = node
-        while (target != null && !target.isLongClickable) target = target.parent
-        if (target?.performAction(AccessibilityNodeInfo.ACTION_LONG_CLICK) == true) return true
-        val bounds = Rect().also(node::getBoundsInScreen)
-        if (bounds.isEmpty || bounds.width() <= 0 || bounds.height() <= 0) return false
-        return swipe(bounds.exactCenterX(), bounds.exactCenterY(), bounds.exactCenterX(), bounds.exactCenterY(), durationMs = 800)
+        var ownsTarget = false
+        try {
+            if (!AccessibilityActionPolicy.canClick(node.isVisibleToUser, node.isEnabled)) return false
+            while (target != null && !target.isLongClickable) {
+                val parent = target.parent
+                if (ownsTarget) target?.let(::recycleNode)
+                target = parent
+                ownsTarget = parent != null
+            }
+            if (target != null && !AccessibilityActionPolicy.canClick(target.isVisibleToUser, target.isEnabled)) return false
+            if (target?.performAction(AccessibilityNodeInfo.ACTION_LONG_CLICK) == true) return true
+            val bounds = Rect().also { target?.getBoundsInScreen(it) ?: node.getBoundsInScreen(it) }
+            if (bounds.isEmpty || bounds.width() <= 0 || bounds.height() <= 0) return false
+            return swipe(bounds.exactCenterX(), bounds.exactCenterY(), bounds.exactCenterX(), bounds.exactCenterY(), durationMs = 800)
+        } finally {
+            if (ownsTarget) target?.let(::recycleNode)
+            recycleNode(node)
+        }
     }
 
     fun type(node: AccessibilityNodeInfo, text: String, submitIme: Boolean = false): Boolean {
-        node.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
-        val args = Bundle().apply {
-            putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
-        }
-        val typed = node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
-        if (typed && submitIme && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            runCatching {
-                node.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_IME_ENTER.id)
+        try {
+            if (!AccessibilityActionPolicy.canType(node.isEditable, node.isVisibleToUser, node.isEnabled)) return false
+            val focused = node.performAction(AccessibilityNodeInfo.ACTION_FOCUS) || node.isFocused
+            if (!focused) Diag.w("control: field declined explicit focus; attempting supported set-text action")
+            val args = Bundle().apply {
+                putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
             }
+            val typed = node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
+            val verified = typed && runCatching {
+                node.refresh() && node.text?.toString() == text
+            }.getOrDefault(false)
+            val submitted = when {
+                !verified -> false
+                !submitIme -> true
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.R -> runCatching {
+                    node.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_IME_ENTER.id)
+                }.getOrDefault(false)
+                else -> false
+            }
+            if (typed && !verified) Diag.w("control: set-text action was not reflected in the editable field")
+            if (verified && submitIme && !submitted) Diag.w("control: text was set but the field did not accept the submit action")
+            return verified && submitted
+        } finally {
+            recycleNode(node)
         }
-        return typed
     }
 
-    fun focusedField(): AccessibilityNodeInfo? =
-        activeRoot()?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)?.takeIf { it.isEditable }
+    fun focusedField(): AccessibilityNodeInfo? = activeRoot()?.let { root ->
+        try {
+            val field = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
+            if (field != null && !field.isEditable) {
+                recycleNode(field)
+                null
+            } else {
+                field
+            }
+        } finally {
+            recycleNode(root)
+        }
+    }
 
     /** Scrolls the primary vertical scrollable area (never mistaking narrow story strips for the main feed). */
     fun scroll(down: Boolean): Boolean {
         val root = activeRoot() ?: return false
         val boxes = mutableListOf<Pair<InstagramMatcher.ScrollableBox, AccessibilityNodeInfo>>()
-        fun visit(node: AccessibilityNodeInfo) {
-            if (node.isScrollable && node.isVisibleToUser) {
-                val r = Rect().also(node::getBoundsInScreen)
-                val vid = node.viewIdResourceName?.substringAfterLast('/').orEmpty()
-                boxes += InstagramMatcher.ScrollableBox(
-                    id = boxes.size,
-                    widthPx = r.width(),
-                    heightPx = r.height(),
-                    viewId = vid,
-                ) to node
+        try {
+            fun visit(node: AccessibilityNodeInfo) {
+                if (node.isScrollable && node.isVisibleToUser) {
+                    val r = Rect().also(node::getBoundsInScreen)
+                    val vid = node.viewIdResourceName?.substringAfterLast('/').orEmpty()
+                    boxes += InstagramMatcher.ScrollableBox(
+                        id = boxes.size,
+                        widthPx = r.width(),
+                        heightPx = r.height(),
+                        viewId = vid,
+                    ) to AccessibilityNodeInfo.obtain(node)
+                }
+                visitChildren(node) { child ->
+                    visit(child)
+                    false
+                }
             }
-            for (i in 0 until node.childCount) node.getChild(i)?.let(::visit)
+            visit(root)
+            val pickedId = InstagramMatcher.pickMainVerticalScrollContainer(boxes.map { it.first })
+            val best = pickedId?.let { id -> boxes.firstOrNull { it.first.id == id }?.second }
+            val action = if (down) AccessibilityNodeInfo.ACTION_SCROLL_FORWARD else AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD
+            if (best?.performAction(action) == true) return true
+            val metrics = resources.displayMetrics
+            val x = metrics.widthPixels / 2f
+            val (from, to) = if (down) metrics.heightPixels * 0.7f to metrics.heightPixels * 0.3f else metrics.heightPixels * 0.3f to metrics.heightPixels * 0.7f
+            return swipe(x, from, x, to)
+        } finally {
+            boxes.forEach { recycleNode(it.second) }
+            recycleNode(root)
         }
-        visit(root)
-        val pickedId = InstagramMatcher.pickMainVerticalScrollContainer(boxes.map { it.first })
-        val best = pickedId?.let { id -> boxes.firstOrNull { it.first.id == id }?.second }
-        val action = if (down) AccessibilityNodeInfo.ACTION_SCROLL_FORWARD else AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD
-        if (best?.performAction(action) == true) return true
-        val metrics = resources.displayMetrics
-        val x = metrics.widthPixels / 2f
-        val (from, to) = if (down) metrics.heightPixels * 0.7f to metrics.heightPixels * 0.3f else metrics.heightPixels * 0.3f to metrics.heightPixels * 0.7f
-        return swipe(x, from, x, to)
     }
 
     /** Captures the screen and preserves whether Android refused due to a FLAG_SECURE window. */
@@ -457,11 +635,29 @@ class ControlService : AccessibilityService() {
             if (!node.isVisibleToUser) return null
             node.getBoundsInScreen(point)
             if (!point.contains(x.toInt(), y.toInt())) return null
-            for (i in node.childCount - 1 downTo 0) node.getChild(i)?.let(::visit)?.let { return it }
-            return node
+            var found: AccessibilityNodeInfo? = null
+            visitChildren(node, reverse = true) { child ->
+                found = visit(child)
+                found != null
+            }
+            return found ?: AccessibilityNodeInfo.obtain(node)
         }
         // Top window first, so JARVIS's own overlay (Allow / Stop) is found when it is there.
-        return windows.sortedByDescending { it.layer }.firstNotNullOfOrNull { it.root?.let(::visit) }
+        val visibleWindows = runCatching { windows.sortedByDescending { it.layer } }.getOrDefault(emptyList())
+        try {
+            for (window in visibleWindows) {
+                val root = runCatching { window.root }.getOrNull() ?: continue
+                val found = try {
+                    visit(root)
+                } finally {
+                    recycleNode(root)
+                }
+                if (found != null) return found
+            }
+            return null
+        } finally {
+            visibleWindows.forEach(::recycleWindow)
+        }
     }
 
     /** Waits until [packageName] is in front (after opening an app). */
@@ -512,7 +708,10 @@ class ControlService : AccessibilityService() {
         fun visit(n: AccessibilityNodeInfo) {
             if (parts.size >= 3) return
             ownLabel(n).takeIf { it.isNotEmpty() && n !== node }?.let { parts += it }
-            for (i in 0 until n.childCount) n.getChild(i)?.let(::visit)
+            visitChildren(n) { child ->
+                visit(child)
+                parts.size >= 3
+            }
         }
         visit(node)
         return parts.joinToString(" · ")

@@ -95,13 +95,13 @@ class VoiceInterruptionTest {
         assertNotNull(maleVoice)
         assertEquals(VoiceGender.Male, maleVoice?.gender)
 
-        // All 5 female voices have VoiceGender.Female
+        // All five real Supertonic female styles are represented by separate speaker IDs.
         val allFemale = listOf(
-            "bundled_hi_female_priyamvada",
-            "bundled_hi_female_kokoro_alpha",
-            "bundled_hi_female_kokoro_beta",
             "bundled_hi_female_supertonic_f1",
             "bundled_hi_female_supertonic_f2",
+            "bundled_hi_female_supertonic_f3",
+            "bundled_hi_female_supertonic_f4",
+            "bundled_hi_female_supertonic_f5",
         )
         allFemale.forEach { id ->
             val v = BundledHindiVoices.find(id)
@@ -109,13 +109,13 @@ class VoiceInterruptionTest {
             assertEquals(id, VoiceGender.Female, v?.gender)
         }
 
-        // All 5 male voices have VoiceGender.Male
+        // All five real Supertonic male styles are represented by separate speaker IDs.
         val allMale = listOf(
-            "bundled_hi_male_pratham",
-            "bundled_hi_male_rohan",
-            "bundled_hi_male_kokoro_omega",
-            "bundled_hi_male_kokoro_psi",
             "bundled_hi_male_supertonic_m1",
+            "bundled_hi_male_supertonic_m2",
+            "bundled_hi_male_supertonic_m3",
+            "bundled_hi_male_supertonic_m4",
+            "bundled_hi_male_supertonic_m5",
         )
         allMale.forEach { id ->
             val v = BundledHindiVoices.find(id)

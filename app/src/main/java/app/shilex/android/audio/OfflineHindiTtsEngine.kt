@@ -62,7 +62,7 @@ class OfflineHindiTtsEngine(private val context: Context) {
             return SynthesisOutcome.Failed(validation.reason)
         }
         if (text.isBlank()) {
-            return SynthesisOutcome.Failed("No Hindi text was provided to speak.")
+            return SynthesisOutcome.Failed("No text was provided to speak.")
         }
         if (isCancelled()) return SynthesisOutcome.Cancelled
 
@@ -96,7 +96,7 @@ class OfflineHindiTtsEngine(private val context: Context) {
                             referenceSampleRate = 0,
                             referenceText = "",
                             numSteps = SUPERTONIC_NUM_STEPS,
-                            extra = mapOf("lang" to voice.lang),
+                            extra = mapOf("lang" to TtsLanguagePolicy.supertonicLanguage(sentence)),
                         )
                         tts.generateWithConfigAndCallback(
                             text = sentence,

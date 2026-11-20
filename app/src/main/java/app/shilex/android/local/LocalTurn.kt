@@ -26,6 +26,7 @@ import app.shilex.android.audio.headphonesConnected
 import app.shilex.android.audio.pcmLevel
 import app.shilex.android.data.Settings
 import app.shilex.android.learn.Habits
+import app.shilex.android.orb.FloatingOrb
 import app.shilex.android.wake.VoiceIndicator
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -82,6 +83,7 @@ class LocalTurn private constructor(private val context: Context) {
         if (active) return true
         val kind = recogniser() ?: return false.also { Diag.i("local: no allowed speech recogniser, using Gemini") }
         active = true
+        FloatingOrb.activate(context)
         _phase.value = LocalPhase.Listening
         VoiceIndicator.onListening(0f)
         VoiceService.start(context) // stops the wake listener so the recogniser gets the mic
@@ -213,6 +215,7 @@ class LocalTurn private constructor(private val context: Context) {
 
     /** Immediately stops any local listening or local TTS reply. */
     fun stop(releaseModel: Boolean = false) {
+        FloatingOrb.dismiss(context)
         stopBargeInMonitor()
         if (active || _phase.value != LocalPhase.Idle) {
             closeRecognizer()
@@ -245,6 +248,7 @@ class LocalTurn private constructor(private val context: Context) {
     private fun finish() {
         stopBargeInMonitor()
         active = false
+        FloatingOrb.replyFinished(context)
         _phase.value = LocalPhase.Idle
         VoiceIndicator.off("local turn done")
         musicPause.resume()

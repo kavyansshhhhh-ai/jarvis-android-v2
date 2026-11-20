@@ -5,6 +5,16 @@ import android.content.SharedPreferences
 import app.shilex.android.wake.WakeDotSize
 import app.shilex.android.wake.WakeIndicatorController
 
+enum class AppearanceMode(val label: String) {
+    Dark("Dark"),
+    Light("Light"),
+    System("System");
+
+    companion object {
+        fun from(value: String?): AppearanceMode = entries.firstOrNull { it.name.equals(value, ignoreCase = true) } ?: Dark
+    }
+}
+
 /** Plain preferences (no secrets). Defaults match the desktop app. */
 enum class AutomationCategory(
     val key: String,
@@ -59,6 +69,10 @@ enum class AutomationCategory(
 
 class Settings(context: Context) {
     private val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
+
+    var appearanceMode: AppearanceMode
+        get() = AppearanceMode.from(prefs.getString(PREF_APPEARANCE_MODE, AppearanceMode.Dark.name))
+        set(value) = prefs.edit().putString(PREF_APPEARANCE_MODE, value.name).apply()
 
     fun isAutomationEnabled(category: AutomationCategory): Boolean =
         prefs.getBoolean(category.key, category.defaultEnabled)
@@ -225,6 +239,7 @@ class Settings(context: Context) {
     val speechLanguages: List<String> = listOf("en-IN", "hi-IN")
 
     companion object {
+        const val PREF_APPEARANCE_MODE = "appearance_mode"
         const val DEFAULT_MODEL = "gemini-3.1-flash-live-preview"
         const val GENDER_FEMALE = "FEMALE"
         const val GENDER_MALE = "MALE"

@@ -306,6 +306,9 @@ object ScreenTools {
             )
             resolved.second?.let { return it }
             val target = resolved.first!!
+            var targetNeedsRelease = true
+            var pendingActionNode: AccessibilityNodeInfo? = null
+            try {
             val pkg = target.packageName?.toString().orEmpty()
             val name = appLabel(service, pkg)
             if (ControlRules.blocked(pkg, allowPlayStoreAutomation = allowPs)) return blocked(name)
@@ -364,11 +367,14 @@ object ScreenTools {
                     "Screen switched to ${beforeSnap.appLabel} before tapping. Read the screen again and continue safely.",
                 )
             }
-            val refreshedNode = (if (explicitNumber > 0) service.node(explicitNumber) else null) ?: target
-            if (!refreshedNode.isEnabled) {
+            val actionNode = (if (explicitNumber > 0) service.node(explicitNumber) else null) ?: target
+            pendingActionNode = actionNode
+            if (!actionNode.isEnabled) {
                 return Results.failed("disabled", "\"${ScreenText.shorten(label)}\" became disabled before tapping.")
             }
-            if (!service.click(refreshedNode)) {
+            pendingActionNode = null
+            if (actionNode === target) targetNeedsRelease = false
+            if (!service.click(actionNode)) {
                 return if (ControlRules.isFinanceApp(pkg)) {
                     accessibilityRestricted(name)
                 } else {
@@ -390,6 +396,10 @@ object ScreenTools {
                 )
             }
             return afterAction(service, "Tapped \"${ScreenText.shorten(label)}\".", beforeSig = beforeSig, allowPlayStore = allowPs)
+            } finally {
+                pendingActionNode?.let { if (it !== target) service.releaseNode(it) }
+                if (targetNeedsRelease) service.releaseNode(target)
+            }
         }
 
         private suspend fun verifyAndRecoverInstagramClick(
@@ -557,8 +567,11 @@ object ScreenTools {
             val allowPs = allowPlayStore(host)
             if (service.isSensitiveAuthActive()) return sensitiveAuth("authentication screen")
             val number = args.optInt("number", 0)
-            var field = (if (number > 0) service.node(number) else service.focusedField())
-                ?.takeIf { it.isEditable && it.isEnabled }
+            var field = if (number > 0) service.node(number) else service.focusedField()
+            if (field != null && (!field.isEditable || !field.isEnabled)) {
+                service.releaseNode(field)
+                field = null
+            }
             if (field == null && number == 0) {
                 // On Instagram DM thread, resolve composer ("Message...") explicitly instead of typing blindly
                 val snap = service.snapshot(allowPlayStore = allowPs)
@@ -567,27 +580,35 @@ object ScreenTools {
                     if (igScreen == InstagramMatcher.InstagramScreenState.DirectThread) {
                         val comp = InstagramMatcher.resolveControl(snap.elements, snap.meta, InstagramMatcher.TargetIntent.Composer, snap.screenHeightPx)
                         if (comp is InstagramMatcher.MatchOutcome.Matched) {
-                            field = service.node(comp.element.number)?.takeIf { it.isEditable && it.isEnabled }
+                            val candidate = service.node(comp.element.number)
+                            if (candidate != null && candidate.isEditable && candidate.isEnabled) {
+                                field = candidate
+                            } else if (candidate != null) {
+                                service.releaseNode(candidate)
+                            }
                         }
                     } else if (igScreen == InstagramMatcher.InstagramScreenState.Reels || igScreen == InstagramMatcher.InstagramScreenState.ShareSheet) {
                         return Results.failed("wrong_screen", "Instagram is on ${igScreen.name}, not a chat or search input. Open the right chat first.")
                     }
                 }
             }
-            field ?: return Results.failed("no_field", "No editable text field selected. Call ui_read and give the field's number.")
-            val pkg = field.packageName?.toString().orEmpty()
+            var fieldNeedsRelease = field != null
+            try {
+            val activeField = field ?: return Results.failed("no_field", "No editable text field selected. Call ui_read and give the field's number.")
+            val pkg = activeField.packageName?.toString().orEmpty()
             val name = appLabel(service, pkg)
             if (ControlRules.blocked(pkg, allowPlayStoreAutomation = allowPs)) return blocked(name)
             if (ControlRules.isFinanceApp(pkg) && !host.authorizeFinance(pkg, name)) {
                 return financeDeclined(name)
             }
-            val label = service.labelOf(field)
-            val viewId = field.viewIdResourceName.orEmpty()
-            if (ControlRules.isCredentialAction(label, viewId, field.isPassword)) {
+            val label = service.labelOf(activeField)
+            val viewId = activeField.viewIdResourceName.orEmpty()
+            if (ControlRules.isCredentialAction(label, viewId, activeField.isPassword)) {
                 return sensitiveAuth(ScreenText.shorten(label.ifEmpty { "credential field" }))
             }
             val beforeSig = service.snapshot(allowPlayStore = allowPs)?.signature.orEmpty()
-            if (!service.type(field, args.text("text"))) {
+            fieldNeedsRelease = false // type() consumes the owned AccessibilityNodeInfo on every path.
+            if (!service.type(activeField, args.text("text"))) {
                 return if (ControlRules.isFinanceApp(pkg)) {
                     accessibilityRestricted(name)
                 } else {
@@ -595,6 +616,9 @@ object ScreenTools {
                 }
             }
             return afterAction(service, "Typed it.", beforeSig = beforeSig, allowPlayStore = allowPs)
+            } finally {
+                if (fieldNeedsRelease) field?.let(service::releaseNode)
+            }
         }
     }
 
@@ -639,11 +663,13 @@ object ScreenTools {
             }
             val node = service.nodeAt(seen.x, seen.y)
             val there = node?.packageName?.toString().orEmpty()
-            if (there == host.context.packageName) return Results.failed("own_screen", "That spot is ${Branding.ASSISTANT_NAME}'s own button.")
-            if (ControlRules.blocked(there) || ControlRules.isFinanceApp(there)) return blocked(appLabel(service, there))
             val label = node?.let(service::labelOf).orEmpty()
             val nodeId = node?.viewIdResourceName.orEmpty()
-            if (ControlRules.isCredentialAction(label, nodeId, node?.isPassword == true) ||
+            val isPassword = node?.isPassword == true
+            node?.let(service::releaseNode)
+            if (there == host.context.packageName) return Results.failed("own_screen", "That spot is ${Branding.ASSISTANT_NAME}'s own button.")
+            if (ControlRules.blocked(there) || ControlRules.isFinanceApp(there)) return blocked(appLabel(service, there))
+            if (ControlRules.isCredentialAction(label, nodeId, isPassword) ||
                 ControlRules.isCredentialAction(seen.sees, "")
             ) {
                 return sensitiveAuth(ScreenText.shorten(label.ifEmpty { seen.sees }.ifEmpty { target }))

@@ -1,18 +1,29 @@
 package app.shilex.android.orb
 
 import android.Manifest
+import android.app.KeyguardManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.PixelFormat
+import android.os.Handler
+import android.os.Looper
+import android.os.PowerManager
 import android.provider.Settings as AndroidSettings
 import android.view.Gravity
 import android.view.WindowManager
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.semantics.contentDescription
@@ -23,6 +34,8 @@ import app.shilex.android.Diag
 import app.shilex.android.MainActivity
 import app.shilex.android.assistant.Phase
 import app.shilex.android.assistant.VoiceSession
+import app.shilex.android.local.LocalPhase
+import app.shilex.android.local.LocalTurn
 import app.shilex.android.control.ControlRules
 import app.shilex.android.control.ControlService
 import app.shilex.android.data.Settings
@@ -31,29 +44,113 @@ import app.shilex.android.ui.ShilexTheme
 import kotlin.math.roundToInt
 
 /**
- * JARVIS's orb floating over every app, so it can be used without opening JARVIS: tap to talk
- * (tap again to stop, or to cut in while it speaks), double-tap to type, drag to move; it
- * settles at the nearest side. Hidden while JARVIS's own screen is open, which has the big orb.
+ * Temporary JARVIS orb shown only during an active assistant event. Tap to talk (tap again to
+ * stop or cut in while speaking), double-tap to type, long-press to close, and drag to move.
+ * It is hidden while JARVIS's own screen is open and while the phone is locked or asleep.
  */
 object FloatingOrb {
     private var host: OverlayHost? = null
     private var params: WindowManager.LayoutParams? = null
+    private var overlayVisibility = mutableStateOf(false)
+    private val main = Handler(Looper.getMainLooper())
+    private var pendingSync: Runnable? = null
+    @Volatile private var assistantEventActive = false
+    @Volatile private var appContext: Context? = null
+    private val hideAfterReply = Runnable {
+        assistantEventActive = false
+        appContext?.let(::syncNow)
+    }
+    private val removeAfterExit = Runnable {
+        appContext?.let { app ->
+            if (shouldShowNow(app)) {
+                overlayVisibility.value = true
+            } else {
+                removeWindowNow(app)
+            }
+        }
+    }
 
     /** True while JARVIS's own screen is in front. */
     @Volatile var appVisible = false
 
     fun allowed(context: Context) = AndroidSettings.canDrawOverlays(context)
 
-    /** Shows or hides the orb to match the setting, permission, visibility, and secure screen boundaries. */
+    /** Permission and the setting enable the capability; a live assistant event is also required. */
     fun sync(context: Context) {
         val app = context.applicationContext
+        appContext = app
+        main.post {
+            pendingSync?.let { main.removeCallbacks(it) }
+            val task = Runnable {
+                pendingSync = null
+                syncNow(app)
+            }
+            pendingSync = task
+            main.postDelayed(task, SYNC_DEBOUNCE_MS)
+        }
+    }
+
+    /** Called when JARVIS activates or starts another user turn. */
+    fun activate(context: Context) {
+        val app = context.applicationContext
+        appContext = app
+        main.post {
+            main.removeCallbacks(hideAfterReply)
+            assistantEventActive = true
+            syncNow(app)
+        }
+    }
+
+    /** Keeps the orb through the reply, then removes the overlay after the short idle grace period. */
+    fun replyFinished(context: Context) {
+        val app = context.applicationContext
+        appContext = app
+        main.post {
+            if (!assistantEventActive) return@post
+            main.removeCallbacks(hideAfterReply)
+            main.postDelayed(hideAfterReply, REPLY_HIDE_DELAY_MS)
+        }
+    }
+
+    /** Stops the temporary overlay immediately, including when the user closes it. */
+    fun dismiss(context: Context) {
+        val app = context.applicationContext
+        appContext = app
+        main.post {
+            main.removeCallbacks(hideAfterReply)
+            assistantEventActive = false
+            syncNow(app)
+        }
+    }
+
+    private fun syncNow(app: Context) {
+        val want = shouldShowNow(app)
+        if (want) {
+            if (host == null) show(app) else {
+                main.removeCallbacks(removeAfterExit)
+                overlayVisibility.value = true
+            }
+        } else if (host != null) {
+            hide(app)
+        }
+    }
+
+    private fun shouldShowNow(app: Context): Boolean {
         val control = ControlService.instance
-        val sensitiveScreen = control != null && (
+        val screenAwakeAndUnlocked =
+            app.getSystemService(PowerManager::class.java)?.isInteractive == true &&
+                app.getSystemService(KeyguardManager::class.java)?.isKeyguardLocked != true
+        val sensitiveScreen = !screenAwakeAndUnlocked || control != null && (
             control.isSensitiveAuthActive() ||
                 control.foregroundPackage().let { it.isNotEmpty() && ControlRules.isSensitiveOrBlockedPackage(it) }
             )
-        val want = Settings(app).floatingOrb && allowed(app) && !appVisible && !sensitiveScreen
-        if (want && host == null) show(app) else if (!want && host != null) hide(app)
+        return TemporaryOrbPolicy.shouldShow(
+            assistantEventActive = assistantEventActive,
+            enabled = Settings(app).floatingOrb,
+            hasOverlayPermission = allowed(app),
+            appVisible = appVisible,
+            sensitiveScreen = sensitiveScreen,
+        )
     }
 
     private fun show(context: Context) {
@@ -73,17 +170,29 @@ object FloatingOrb {
             y = settings.orbY.takeIf { it >= 0 } ?: (screen.heightPixels * 0.6f).roundToInt()
         }
         val orb = OverlayHost(context)
+        overlayVisibility.value = true
         orb.open {
             val session = VoiceSession.get(context)
             val state by session.state.collectAsStateWithLifecycle()
             val level by session.level.collectAsStateWithLifecycle()
+            val localPhase by LocalTurn.get(context).phase.collectAsStateWithLifecycle()
+            val orbPhase = when (localPhase) {
+                LocalPhase.Listening -> Phase.Listening
+                LocalPhase.Doing -> Phase.Connecting
+                LocalPhase.Speaking -> Phase.Speaking
+                LocalPhase.Idle -> if (state.phase == Phase.Processing) Phase.Connecting else state.phase
+            }
             ShilexTheme {
                 Box(
                     Modifier
                         .fillMaxSize()
-                        .semantics { contentDescription = "${Branding.ASSISTANT_NAME}: tap to talk, double-tap to type" }
+                        .semantics { contentDescription = "${Branding.ASSISTANT_NAME}: tap to talk, double-tap to type, long-press to close" }
                         .pointerInput(Unit) {
-                            detectTapGestures(onTap = { tap(context) }, onDoubleTap = { TypeBox.show(context) })
+                            detectTapGestures(
+                                onTap = { tap(context) },
+                                onDoubleTap = { TypeBox.show(context) },
+                                onLongPress = { dismiss(context) },
+                            )
                         }
                         .pointerInput(Unit) {
                             detectDragGestures(
@@ -95,7 +204,13 @@ object FloatingOrb {
                             )
                         },
                 ) {
-                    Orb(state.phase, Modifier.fillMaxSize(), level)
+                    AnimatedVisibility(
+                        visible = overlayVisibility.value,
+                        enter = fadeIn(tween(220)) + scaleIn(initialScale = 0.72f, animationSpec = tween(220)),
+                        exit = fadeOut(tween(180)) + scaleOut(targetScale = 0.72f, animationSpec = tween(180)),
+                    ) {
+                        Orb(orbPhase, Modifier.fillMaxSize(), level)
+                    }
                 }
             }
         }
@@ -103,17 +218,30 @@ object FloatingOrb {
             .onSuccess {
                 host = orb
                 params = p
+                main.removeCallbacks(removeAfterExit)
                 Diag.i("orb: shown")
             }
-            .onFailure { Diag.w("orb: couldn't show (${it.javaClass.simpleName})") }
+            .onFailure {
+                overlayVisibility.value = false
+                Diag.w("orb: couldn't show (${it.javaClass.simpleName})")
+            }
     }
 
     private fun hide(context: Context) {
+        if (!overlayVisibility.value) return
+        overlayVisibility.value = false
+        main.removeCallbacks(removeAfterExit)
+        main.postDelayed(removeAfterExit, EXIT_ANIMATION_MS)
+        TypeBox.hide(context)
+    }
+
+    private fun removeWindowNow(context: Context) {
         val orb = host ?: return
         runCatching { context.getSystemService(WindowManager::class.java).removeView(orb.view) }
         orb.close()
         host = null
         params = null
+        overlayVisibility.value = false
         TypeBox.hide(context)
         Diag.i("orb: hidden")
     }
@@ -160,4 +288,7 @@ object FloatingOrb {
     }
 
     private const val ORB_DP = 64
+    private const val REPLY_HIDE_DELAY_MS = 3_000L
+    private const val EXIT_ANIMATION_MS = 220L
+    private const val SYNC_DEBOUNCE_MS = 120L
 }

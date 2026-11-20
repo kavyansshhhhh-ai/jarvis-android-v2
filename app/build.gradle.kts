@@ -127,25 +127,14 @@ val fetchOfflineHindiTts by tasks.registering {
     val out = ttsAssets.get().asFile
     val scriptFile = rootProject.file("scripts/fetch_hindi_tts.py")
     val aarFile = file("libs/sherpa-onnx-static-link-onnxruntime-1.13.8.aar")
+    inputs.file(scriptFile)
     outputs.dir(out)
     doLast {
         if (!scriptFile.exists()) {
             throw GradleException("Missing downloader script: ${scriptFile.absolutePath}")
         }
         val requiredFiles = listOf(
-            out.resolve("voices/.tts-assets-v2.ready"),
-            out.resolve("voices/espeak-ng-data/hi_dict"),
-            out.resolve("voices/espeak-ng-data/phontab"),
-            out.resolve("voices/espeak-ng-data/phondata"),
-            out.resolve("voices/espeak-ng-data/phonindex"),
-            out.resolve("voices/espeak-ng-data/intonations"),
-            out.resolve("voices/espeak-ng-data/lang/inc/hi"),
-            out.resolve("voices/piper/priyamvada/hi_IN-priyamvada-medium.onnx"),
-            out.resolve("voices/piper/pratham/hi_IN-pratham-medium.onnx"),
-            out.resolve("voices/piper/rohan/hi_IN-rohan-medium.onnx"),
-            out.resolve("voices/kokoro/model.int8.onnx"),
-            out.resolve("voices/kokoro/voices.bin"),
-            out.resolve("voices/kokoro/tokens.txt"),
+            out.resolve("voices/.tts-assets-v3.ready"),
             out.resolve("voices/supertonic/duration_predictor.int8.onnx"),
             out.resolve("voices/supertonic/text_encoder.int8.onnx"),
             out.resolve("voices/supertonic/vector_estimator.int8.onnx"),
@@ -153,6 +142,7 @@ val fetchOfflineHindiTts by tasks.registering {
             out.resolve("voices/supertonic/tts.json"),
             out.resolve("voices/supertonic/unicode_indexer.bin"),
             out.resolve("voices/supertonic/voice.bin"),
+            out.resolve("voices/supertonic/LICENSE"),
         )
         if (aarFile.exists() && aarFile.length() > 0L && requiredFiles.all { it.exists() && it.length() > 0L }) {
             return@doLast

@@ -125,84 +125,31 @@ class VoiceClassifierTest {
     fun bundledHindiVoicesAreGenuineDistinctAndOfflineCapable() {
         val voices = BundledHindiVoices.ALL
         assertEquals(10, voices.size)
-
-        // 5 distinct Female voices: Priyamvada (Piper), hf_alpha & hf_beta (Kokoro-82M), F1 & F2 (Supertonic-3)
         val female = voices.filter { it.gender == VoiceGender.Female }
         assertEquals(5, female.size)
-        assertEquals("bundled_hi_female_priyamvada", female[0].id)
-        assertEquals("Hindi Female 1", female[0].displayName)
-        assertEquals(BundledEngineKind.PiperVits, female[0].engineKind)
-        assertTrue(female[0].modelAssetPath.endsWith(".onnx"))
-        assertTrue(female[0].configAssetPath.endsWith(".json"))
-        assertEquals(22050, female[0].sampleRate)
-        assertTrue(female[0].licenseNotice.isNotBlank())
-        assertTrue(female[0].datasetSource.contains("AI4Bharat"))
+        assertEquals((0..4).toList(), female.map { it.speakerId })
+        assertEquals((1..5).map { "Hindi Female $it" }, female.map { it.displayName })
 
-        assertEquals("bundled_hi_female_kokoro_alpha", female[1].id)
-        assertEquals("Hindi Female 2", female[1].displayName)
-        assertEquals(BundledEngineKind.KokoroMultiLang, female[1].engineKind)
-        assertEquals(31, female[1].speakerId)
-        assertEquals("voices/kokoro/voices.bin", female[1].voicesAssetPath)
-        assertEquals(24000, female[1].sampleRate)
-
-        assertEquals("bundled_hi_female_kokoro_beta", female[2].id)
-        assertEquals("Hindi Female 3", female[2].displayName)
-        assertEquals(BundledEngineKind.KokoroMultiLang, female[2].engineKind)
-        assertEquals(32, female[2].speakerId)
-
-        assertEquals("bundled_hi_female_supertonic_f1", female[3].id)
-        assertEquals("Hindi Female 4", female[3].displayName)
-        assertEquals(BundledEngineKind.Supertonic, female[3].engineKind)
-        assertEquals(0, female[3].speakerId)
-        assertEquals(44100, female[3].sampleRate)
-        assertEquals("MIT", female[3].licenseNotice)
-        assertTrue(female[3].durationPredictorAssetPath.endsWith(".onnx"))
-        assertTrue(female[3].voiceStyleAssetPath.endsWith("voice.bin"))
-
-        assertEquals("bundled_hi_female_supertonic_f2", female[4].id)
-        assertEquals("Hindi Female 5", female[4].displayName)
-        assertEquals(BundledEngineKind.Supertonic, female[4].engineKind)
-        assertEquals(1, female[4].speakerId)
-        assertEquals(44100, female[4].sampleRate)
-        assertEquals("MIT", female[4].licenseNotice)
-
-        // 5 distinct Male voices: Pratham (Piper), Rohan (Piper), hm_omega & hm_psi (Kokoro-82M), M1 (Supertonic-3)
         val male = voices.filter { it.gender == VoiceGender.Male }
         assertEquals(5, male.size)
-        assertEquals("bundled_hi_male_pratham", male[0].id)
-        assertEquals("Hindi Male 1", male[0].displayName)
-        assertEquals(BundledEngineKind.PiperVits, male[0].engineKind)
-
-        assertEquals("bundled_hi_male_rohan", male[1].id)
-        assertEquals("Hindi Male 2", male[1].displayName)
-        assertEquals(BundledEngineKind.PiperVits, male[1].engineKind)
-
-        assertEquals("bundled_hi_male_kokoro_omega", male[2].id)
-        assertEquals("Hindi Male 3", male[2].displayName)
-        assertEquals(BundledEngineKind.KokoroMultiLang, male[2].engineKind)
-        assertEquals(33, male[2].speakerId)
-
-        assertEquals("bundled_hi_male_kokoro_psi", male[3].id)
-        assertEquals("Hindi Male 4", male[3].displayName)
-        assertEquals(BundledEngineKind.KokoroMultiLang, male[3].engineKind)
-        assertEquals(34, male[3].speakerId)
-
-        assertEquals("bundled_hi_male_supertonic_m1", male[4].id)
-        assertEquals("Hindi Male 5", male[4].displayName)
-        assertEquals(BundledEngineKind.Supertonic, male[4].engineKind)
-        assertEquals(5, male[4].speakerId)
-        assertEquals(44100, male[4].sampleRate)
-        assertEquals("MIT", male[4].licenseNotice)
+        assertEquals((5..9).toList(), male.map { it.speakerId })
+        assertEquals((1..5).map { "Hindi Male $it" }, male.map { it.displayName })
 
         assertEquals(10, voices.map { it.id }.toSet().size)
         assertTrue(voices.all { it.locale == Locale("hi", "IN") })
         assertTrue(voices.all { it.toTtsVoiceInfo().isOfflineCapable })
+        assertTrue(voices.all { it.engineKind == BundledEngineKind.Supertonic })
+        assertTrue(voices.all { it.sampleRate == 24000 })
+        assertTrue(voices.all { it.licenseNotice == "OpenRAIL-M" })
+        assertTrue(voices.all { it.datasetSource.contains("Supertonic-3") })
         assertTrue(
             voices.all {
                 it.modelAssetPath.endsWith(".onnx") &&
-                    (it.tokensAssetPath.endsWith("tokens.txt") || it.tokensAssetPath.endsWith(".bin"))
+                    it.tokensAssetPath.endsWith(".bin") &&
+                    it.voiceStyleAssetPath.endsWith("voice.bin")
             },
         )
+        assertTrue(BundledHindiVoices.validateCatalog().isValid)
     }
 
     @Test
@@ -216,8 +163,8 @@ class VoiceClassifierTest {
         assertEquals("Hindi Female 3", catalog.femaleVoices[2].displayName)
         assertEquals("Hindi Female 4", catalog.femaleVoices[3].displayName)
         assertEquals("Hindi Female 5", catalog.femaleVoices[4].displayName)
-        assertEquals("bundled_hi_female_priyamvada", catalog.femaleVoices[0].id)
-        assertEquals("bundled_hi_female_supertonic_f2", catalog.femaleVoices[4].id)
+        assertEquals("bundled_hi_female_supertonic_f1", catalog.femaleVoices[0].id)
+        assertEquals("bundled_hi_female_supertonic_f5", catalog.femaleVoices[4].id)
         assertTrue(catalog.femaleVoices.all { it.isBundled && it.isOfflineCapable })
 
         assertEquals(5, catalog.maleVoices.size)
@@ -226,8 +173,8 @@ class VoiceClassifierTest {
         assertEquals("Hindi Male 3", catalog.maleVoices[2].displayName)
         assertEquals("Hindi Male 4", catalog.maleVoices[3].displayName)
         assertEquals("Hindi Male 5", catalog.maleVoices[4].displayName)
-        assertEquals("bundled_hi_male_pratham", catalog.maleVoices[0].id)
-        assertEquals("bundled_hi_male_supertonic_m1", catalog.maleVoices[4].id)
+        assertEquals("bundled_hi_male_supertonic_m1", catalog.maleVoices[0].id)
+        assertEquals("bundled_hi_male_supertonic_m5", catalog.maleVoices[4].id)
         assertTrue(catalog.maleVoices.all { it.isBundled && it.isOfflineCapable })
 
         // Verify 5-per-category cap holds when combined with system voices, keeping bundled first
@@ -240,8 +187,8 @@ class VoiceClassifierTest {
         val cappedCatalog = VoiceClassifier.buildHindiCatalog(extraSystem, bundled)
         assertEquals(5, cappedCatalog.femaleVoices.size)
         assertEquals(5, cappedCatalog.maleVoices.size)
-        assertEquals("bundled_hi_female_priyamvada", cappedCatalog.femaleVoices[0].id)
-        assertEquals("bundled_hi_male_pratham", cappedCatalog.maleVoices[0].id)
+        assertEquals("bundled_hi_female_supertonic_f1", cappedCatalog.femaleVoices[0].id)
+        assertEquals("bundled_hi_male_supertonic_m1", cappedCatalog.maleVoices[0].id)
     }
 
     @Test
@@ -253,17 +200,17 @@ class VoiceClassifierTest {
 
         // Default female / male fallback when no saved voice ID exists
         assertEquals(
-            "bundled_hi_female_priyamvada",
+            "bundled_hi_female_supertonic_f1",
             VoiceClassifier.resolveEffectiveVoiceId(null, catalog, preferMale = false),
         )
         assertEquals(
-            "bundled_hi_male_pratham",
+            "bundled_hi_male_supertonic_m1",
             VoiceClassifier.resolveEffectiveVoiceId(null, catalog, preferMale = true),
         )
 
         // Preserves user's saved selection exactly (including Supertonic voices)
         assertEquals(
-            "bundled_hi_male_kokoro_psi",
+            "bundled_hi_male_supertonic_m4",
             VoiceClassifier.resolveEffectiveVoiceId("bundled_hi_male_kokoro_psi", catalog, preferMale = false),
         )
         assertEquals(
@@ -277,9 +224,26 @@ class VoiceClassifierTest {
 
         // Missing/removed voice falls back cleanly to gender preference
         assertEquals(
-            "bundled_hi_male_pratham",
+            "bundled_hi_male_supertonic_m1",
             VoiceClassifier.resolveEffectiveVoiceId("removed_voice_id", catalog, preferMale = true),
         )
+    }
+
+    @Test
+    fun legacySavedVoiceIdsMigrateToHindiCapableSupertonicStyles() {
+        val catalog = VoiceClassifier.buildHindiCatalog(emptyList(), BundledHindiVoices.ALL.map { it.toTtsVoiceInfo() })
+        val migrations = mapOf(
+            "bundled_hi_female_priyamvada" to "bundled_hi_female_supertonic_f1",
+            "bundled_hi_female_kokoro_alpha" to "bundled_hi_female_supertonic_f2",
+            "bundled_hi_female_kokoro_beta" to "bundled_hi_female_supertonic_f3",
+            "bundled_hi_male_pratham" to "bundled_hi_male_supertonic_m1",
+            "bundled_hi_male_rohan" to "bundled_hi_male_supertonic_m2",
+            "bundled_hi_male_kokoro_omega" to "bundled_hi_male_supertonic_m3",
+            "bundled_hi_male_kokoro_psi" to "bundled_hi_male_supertonic_m4",
+        )
+        migrations.forEach { (oldId, newId) ->
+            assertEquals(newId, VoiceClassifier.resolveEffectiveVoiceId(oldId, catalog))
+        }
     }
 
     @Test
@@ -312,7 +276,7 @@ class VoiceClassifierTest {
     }
 
     @Test
-    fun rejectsInvalidVoiceMetadataAndMissingEspeakTablesBeforeNativeJniCall() {
+    fun rejectsInvalidVoiceMetadataAndMissingSupertonicFilesBeforeNativeJniCall() {
         val catalogValidation = BundledHindiVoices.validateCatalog()
         assertTrue(catalogValidation.isValid)
         assertEquals(10, BundledHindiVoices.ALL.size)
@@ -327,37 +291,32 @@ class VoiceClassifierTest {
 
         val tempRoot = java.nio.file.Files.createTempDirectory("tts_guard_test").toFile()
         try {
-            val espeakDir = java.io.File(tempRoot, "espeak-ng-data").apply { mkdirs() }
-            val modelFile = java.io.File(tempRoot, "model.onnx").apply { writeBytes(ByteArray(32) { 1 }) }
-            val tokensFile = java.io.File(tempRoot, "tokens.txt").apply { writeText("a 1\n") }
-
-            // Missing espeak tables -> must return failure message instead of invoking Sherpa-ONNX JNI
-            espeakDir.resolve("hi_dict").writeBytes(ByteArray(8) { 1 })
-            espeakDir.resolve("phontab").writeBytes(ByteArray(8) { 1 })
-            val missingTables = OfflineHindiTtsEngine.validateExtractedFiles(
-                voice = BundledHindiVoices.PRIYAMVADA,
-                paths = mapOf(
-                    BundledHindiVoices.PRIYAMVADA.modelAssetPath to modelFile,
-                    BundledHindiVoices.PRIYAMVADA.tokensAssetPath to tokensFile,
-                ),
-                espeakDir = espeakDir,
-            )
-            assertTrue(missingTables?.contains("phonindex") == true || missingTables?.contains("phondata") == true)
-
-            // Populate all required espeak-ng tables -> validation succeeds cleanly
-            espeakDir.resolve("lang/inc").mkdirs()
-            BundledHindiVoices.REQUIRED_ESPEAK_FILES.forEach { rel ->
-                espeakDir.resolve(rel).writeBytes(ByteArray(8) { 1 })
+            val voice = BundledHindiVoices.SUPERTONIC_F1
+            val paths = listOf(
+                voice.durationPredictorAssetPath,
+                voice.textEncoderAssetPath,
+                voice.vectorEstimatorAssetPath,
+                voice.vocoderAssetPath,
+                voice.ttsJsonAssetPath,
+                voice.unicodeIndexerAssetPath,
+                voice.voiceStyleAssetPath,
+            ).distinct().associateWith { assetPath ->
+                val file = java.io.File(tempRoot, assetPath.substringAfterLast('/'))
+                val size = if (assetPath == voice.voiceStyleAssetPath) 64 else 8
+                file.writeBytes(ByteArray(size) { 1 })
+                file
             }
-            val ok = OfflineHindiTtsEngine.validateExtractedFiles(
-                voice = BundledHindiVoices.PRIYAMVADA,
-                paths = mapOf(
-                    BundledHindiVoices.PRIYAMVADA.modelAssetPath to modelFile,
-                    BundledHindiVoices.PRIYAMVADA.tokensAssetPath to tokensFile,
-                ),
-                espeakDir = espeakDir,
+
+            val missingModel = OfflineHindiTtsEngine.validateExtractedFiles(
+                voice = voice,
+                paths = paths - voice.durationPredictorAssetPath,
+                espeakDir = null,
             )
-            assertEquals(null, ok)
+            assertTrue(missingModel?.contains("duration_predictor") == true)
+
+            // Supertonic uses its own Unicode index and voice style assets; no eSpeak tree is needed.
+            val valid = OfflineHindiTtsEngine.validateExtractedFiles(voice, paths, espeakDir = null)
+            assertEquals(null, valid)
         } finally {
             tempRoot.deleteRecursively()
         }

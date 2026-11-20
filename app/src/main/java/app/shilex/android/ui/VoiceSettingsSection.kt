@@ -148,7 +148,7 @@ fun JarvisVoiceSubScreen(
                         modifier = Modifier
                             .glassPressScale(interaction)
                             .clip(RoundedCornerShape(50))
-                            .background(Color(0x1CFFFFFF))
+                            .background(GlassSurfaceHighlight)
                             .border(0.8.dp, GlassBorderSubtle, RoundedCornerShape(50))
                             .clickable(interactionSource = interaction, indication = null) {
                                 speaker.stopPreview()
@@ -364,7 +364,7 @@ private fun VoiceChoiceList(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(shape)
-                    .background(if (isSelected) accent.copy(alpha = 0.14f) else Color(0x0EFFFFFF))
+                    .background(if (isSelected) accent.copy(alpha = 0.14f) else GlassSurfaceHighlight.copy(alpha = 0.7f))
                     .border(
                         0.8.dp,
                         if (isSelected) accent.copy(alpha = 0.6f) else GlassBorderSubtle,
@@ -456,12 +456,12 @@ private fun VoiceChoiceList(
                 val previewBoxBg = when {
                     isPlaying -> CoralError.copy(alpha = 0.2f)
                     isLoading -> ElectricCyan.copy(alpha = 0.18f)
-                    else -> Color(0x1EFFFFFF)
+                    else -> GlassSurfaceHighlight
                 }
                 val previewBoxBorder = when {
                     isPlaying -> CoralError.copy(alpha = 0.6f)
                     isLoading -> ElectricCyan.copy(alpha = 0.6f)
-                    else -> Color(0x33FFFFFF)
+                    else -> GlassBorderSubtle
                 }
 
                 Box(
@@ -581,7 +581,7 @@ private fun VoiceControlSlider(
             colors = SliderDefaults.colors(
                 thumbColor = PureWhite,
                 activeTrackColor = accent,
-                inactiveTrackColor = Color(0x2EFFFFFF),
+                inactiveTrackColor = GlassBorderColor.copy(alpha = 0.72f),
             ),
             modifier = Modifier
                 .fillMaxWidth()
