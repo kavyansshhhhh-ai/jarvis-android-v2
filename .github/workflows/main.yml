@@ -10,6 +10,8 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
 
     steps:
       - name: Checkout repository
@@ -22,15 +24,59 @@ jobs:
           java-version: '17'
 
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+        run: |
+          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          if [ ! -d "$SDK_ROOT" ]; then
+            echo "Error: Android SDK not found at $SDK_ROOT" >&2
+            exit 1
+          fi
+          echo "ANDROID_HOME=$SDK_ROOT" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK_ROOT" >> "$GITHUB_ENV"
+
+          SDKMANAGER="$(find "$SDK_ROOT/cmdline-tools" -maxdepth 3 -type f -name sdkmanager 2>/dev/null | sort -V | tail -n 1)"
+          if [ -z "$SDKMANAGER" ]; then
+            echo "Error: sdkmanager not found under $SDK_ROOT/cmdline-tools" >&2
+            exit 1
+          fi
+          echo "$(dirname "$SDKMANAGER")" >> "$GITHUB_PATH"
+          echo "$SDK_ROOT/platform-tools" >> "$GITHUB_PATH"
+
+          { yes || true; } | "$SDKMANAGER" --sdk_root="$SDK_ROOT" --licenses >/dev/null
+
+          PACKAGES=()
+          [ -d "$SDK_ROOT/platform-tools" ] || PACKAGES+=("platform-tools")
+          [ -d "$SDK_ROOT/platforms/android-35" ] || PACKAGES+=("platforms;android-35")
+          [ -d "$SDK_ROOT/build-tools/34.0.0" ] || PACKAGES+=("build-tools;34.0.0")
+          [ -d "$SDK_ROOT/ndk/27.0.12077973" ] || PACKAGES+=("ndk;27.0.12077973")
+          [ -d "$SDK_ROOT/cmake/3.22.1" ] || PACKAGES+=("cmake;3.22.1")
+
+          if [ ${#PACKAGES[@]} -gt 0 ]; then
+            echo "Installing missing Android SDK packages: ${PACKAGES[*]}"
+            "$SDKMANAGER" --sdk_root="$SDK_ROOT" "${PACKAGES[@]}"
+          else
+            echo "All required Android SDK packages are already installed."
+          fi
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Build and test JARVIS
+      - name: Run unit tests, Android lint, and build JARVIS Debug APK
         run: |
           chmod +x gradlew
-          ./gradlew :app:testDebugUnitTest :app:assembleDebug --no-daemon
+          ./gradlew :app:testDebugUnitTest :app:lintDebug :app:assembleDebug --no-daemon
+
+      - name: Verify debug APK exists and is below 500 MB
+        shell: bash
+        run: |
+          APK="app/build/outputs/apk/debug/app-debug.apk"
+          test -f "$APK"
+          SIZE_BYTES="$(stat -c '%s' "$APK")"
+          MAX_BYTES=500000000
+          echo "Debug APK size: $SIZE_BYTES bytes"
+          if [ "$SIZE_BYTES" -ge "$MAX_BYTES" ]; then
+            echo "Debug APK must be smaller than 500 MB (500,000,000 bytes)." >&2
+            exit 1
+          fi
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
@@ -39,4 +85,3 @@ jobs:
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 7
-          
