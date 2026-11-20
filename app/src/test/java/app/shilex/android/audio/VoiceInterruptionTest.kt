@@ -62,6 +62,68 @@ class VoiceInterruptionTest {
     }
 
     @Test
+    fun previewPlaybackStateTracksIdleAndCancellation() {
+        val speaker = Speaker()
+        assertEquals(VoicePreviewState.Idle, speaker.previewPlayback.value.state)
+        assertNull(speaker.previewPlayback.value.voiceId)
+
+        var completedFemale = false
+        speaker.previewVoice("bundled_hi_female_priyamvada") { completedFemale = true }
+        assertTrue(completedFemale)
+        assertEquals(VoicePreviewState.Idle, speaker.previewPlayback.value.state)
+
+        var completedMale = false
+        speaker.previewVoice("bundled_hi_male_pratham") { completedMale = true }
+        assertTrue(completedMale)
+        assertEquals(VoicePreviewState.Idle, speaker.previewPlayback.value.state)
+
+        speaker.stopPreview()
+        assertEquals(VoicePreviewState.Idle, speaker.previewPlayback.value.state)
+        assertNull(speaker.previewingVoiceId.value)
+        assertFalse(speaker.isSpeaking.value)
+        speaker.release()
+    }
+
+    @Test
+    fun femaleAndMaleVoiceConfigurationsProduceDistinctGenders() {
+        val femaleVoice = BundledHindiVoices.find("bundled_hi_female_priyamvada")
+        assertNotNull(femaleVoice)
+        assertEquals(VoiceGender.Female, femaleVoice?.gender)
+
+        val maleVoice = BundledHindiVoices.find("bundled_hi_male_pratham")
+        assertNotNull(maleVoice)
+        assertEquals(VoiceGender.Male, maleVoice?.gender)
+
+        // All 5 female voices have VoiceGender.Female
+        val allFemale = listOf(
+            "bundled_hi_female_priyamvada",
+            "bundled_hi_female_kokoro_alpha",
+            "bundled_hi_female_kokoro_beta",
+            "bundled_hi_female_supertonic_f1",
+            "bundled_hi_female_supertonic_f2",
+        )
+        allFemale.forEach { id ->
+            val v = BundledHindiVoices.find(id)
+            assertNotNull(v)
+            assertEquals(id, VoiceGender.Female, v?.gender)
+        }
+
+        // All 5 male voices have VoiceGender.Male
+        val allMale = listOf(
+            "bundled_hi_male_pratham",
+            "bundled_hi_male_rohan",
+            "bundled_hi_male_kokoro_omega",
+            "bundled_hi_male_kokoro_psi",
+            "bundled_hi_male_supertonic_m1",
+        )
+        allMale.forEach { id ->
+            val v = BundledHindiVoices.find(id)
+            assertNotNull(v)
+            assertEquals(id, VoiceGender.Male, v?.gender)
+        }
+    }
+
+    @Test
     fun pcmLevelDetectionIsAccurate() {
         assertEquals(0, pcmLevel(ByteArray(0)))
         val highEnergy = ByteArray(4).also {

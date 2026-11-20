@@ -59,7 +59,7 @@ class TurnTrust {
         val READS_OUTSIDE_TEXT = setOf(
             "ui_read", "ui_click", "ui_tap_seen", "ui_type", "ui_scroll", "ui_key", "open_app", "book_tickets",
             "notifications_check", "hand_to_user", "calendar_list",
-            "whatsapp_read_chat", "playstore_search_install", "gallery_delete_photo",
+            "whatsapp_read_chat", "whatsapp_delete_message", "playstore_search_install", "gallery_delete_photo",
         )
     }
 }

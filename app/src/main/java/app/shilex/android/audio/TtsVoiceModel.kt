@@ -357,20 +357,26 @@ object BundledHindiVoices {
                 voice.ttsJsonAssetPath,
                 voice.unicodeIndexerAssetPath,
                 voice.voiceStyleAssetPath,
-            ).all { it.isNotEmpty() && assetExists(context, it) }
+            ).all { it.isNotEmpty() && (assetFileReady(context, it) || assetExists(context, it)) }
 
             BundledEngineKind.PiperVits, BundledEngineKind.KokoroMultiLang -> {
-                val hasModel = assetExists(context, voice.modelAssetPath)
-                val hasTokens = assetExists(context, voice.tokensAssetPath)
-                val hasConfig = voice.configAssetPath.isEmpty() || assetExists(context, voice.configAssetPath)
+                val hasModel = assetFileReady(context, voice.modelAssetPath) || assetExists(context, voice.modelAssetPath)
+                val hasTokens = assetFileReady(context, voice.tokensAssetPath) || assetExists(context, voice.tokensAssetPath)
+                val hasConfig = voice.configAssetPath.isEmpty() || assetFileReady(context, voice.configAssetPath) || assetExists(context, voice.configAssetPath)
                 val hasEspeak = REQUIRED_ESPEAK_FILES.all { rel ->
-                    assetExists(context, "$ESPEAK_DATA_ASSET_DIR/$rel")
+                    assetFileReady(context, "espeak-ng-data/$rel") || assetExists(context, "$ESPEAK_DATA_ASSET_DIR/$rel")
                 }
-                val hasVoices = voice.voicesAssetPath.isEmpty() || assetExists(context, voice.voicesAssetPath)
+                val hasVoices = voice.voicesAssetPath.isEmpty() || assetFileReady(context, voice.voicesAssetPath) || assetExists(context, voice.voicesAssetPath)
                 hasModel && hasTokens && hasConfig && hasEspeak && hasVoices
             }
         }
     }
+
+    private fun assetFileReady(context: Context, assetPath: String): Boolean =
+        runCatching {
+            val f = java.io.File(context.filesDir, "tts/$assetPath")
+            f.exists() && f.length() > 0L
+        }.getOrDefault(false)
 
     private fun assetExists(context: Context, assetPath: String): Boolean =
         runCatching { context.assets.open(assetPath).use { it.available() >= 0 } }.getOrDefault(false)
@@ -649,7 +655,7 @@ object VoiceClassifier {
     /** Localized Hindi preview sentence. */
     fun sampleTextForLocale(locale: Locale): String {
         return when (locale.language.lowercase(Locale.ROOT)) {
-            "hi" -> "नमस्ते! मैं जार्विस हूँ। बताइए, मैं आपकी क्या मदद कर सकता हूँ?"
+            "hi" -> "नमस्ते! मैं आपकी कैसे मदद कर सकता हूँ?"
             else -> "Hello! I am JARVIS. How can I help you today?"
         }
     }

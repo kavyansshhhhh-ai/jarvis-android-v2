@@ -118,7 +118,7 @@ class VoiceClassifierTest {
         assertEquals(Settings.GENDER_MALE, Settings.normalizeGenderFilter("male"))
 
         val hiSample = VoiceClassifier.sampleTextForLocale(Locale("hi", "IN"))
-        assertTrue(hiSample.contains("जार्विस"))
+        assertEquals("नमस्ते! मैं आपकी कैसे मदद कर सकता हूँ?", hiSample)
     }
 
     @Test
@@ -302,6 +302,13 @@ class VoiceClassifierTest {
             "नमस्ते! मैं जार्विस हूँ। बताइए, मैं आपकी क्या मदद कर सकता हूँ?",
         )
         assertEquals(3, parts.size)
+
+        val previewParts = OfflineHindiTtsEngine.splitSentencesForLowLatency(
+            "नमस्ते! मैं आपकी कैसे मदद कर सकता हूँ?",
+        )
+        assertEquals(2, previewParts.size)
+        assertEquals("नमस्ते!", previewParts[0])
+        assertEquals("मैं आपकी कैसे मदद कर सकता हूँ?", previewParts[1])
     }
 
     @Test

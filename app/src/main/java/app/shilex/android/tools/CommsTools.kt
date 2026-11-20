@@ -12,6 +12,7 @@ import app.shilex.android.Branding
 import app.shilex.android.control.ControlService
 import app.shilex.android.control.WhatsAppCallMatcher
 import app.shilex.android.control.WhatsAppChatVerifier
+import app.shilex.android.control.WhatsAppDeleteMatcher
 import app.shilex.android.control.WhatsAppWorkflow
 import app.shilex.android.data.AutomationCategory
 import app.shilex.android.data.Settings as AppSettings
@@ -64,6 +65,7 @@ object CommsTools {
         WhatsAppReadChat,
         WhatsAppSearchContact,
         WhatsAppCall,
+        WhatsAppDeleteMessage,
         SmsSend,
     )
 
@@ -376,6 +378,42 @@ object CommsTools {
                     skipInternalConfirm = true,
                 )
             }
+        }
+    }
+
+    private object WhatsAppDeleteMessage : PhoneTool {
+        override val name = "whatsapp_delete_message"
+
+        override fun declaration() = Schema.function(
+            name,
+            "Deletes the user's own WhatsApp message in the currently open chat. Asks the user to confirm once before proceeding. " +
+                "Distinguishes 'Delete for everyone' from 'Delete for me'. Never bypasses WhatsApp's time restrictions or security.",
+            Schema.string("snippet", "A few words from the message to find and delete. Leave empty for the last sent message."),
+            Schema.string("scope", "delete_for_everyone (default) or delete_for_me.", choices = listOf("delete_for_everyone", "delete_for_me")),
+        )
+
+        override suspend fun run(args: JSONObject, host: ToolHost): JSONObject {
+            val service = ControlService.instance?.takeIf { !it.overlay.stopped }
+                ?: return Results.failed("control_off", "Phone control is off. Turn on Accessibility control to delete WhatsApp messages.")
+            val fg = service.foregroundPackage()
+            if (fg !in WhatsAppWorkflow.WHATSAPP_PACKAGES) {
+                return Results.failed("not_whatsapp", "WhatsApp isn't currently open (visible app: $fg). Open the chat first.")
+            }
+            val snippet = args.text("snippet")
+            val scope = if (args.text("scope").equals("delete_for_me", ignoreCase = true)) {
+                WhatsAppDeleteMatcher.DeleteScope.ForMe
+            } else {
+                WhatsAppDeleteMatcher.DeleteScope.ForEveryone
+            }
+            val autoDeleteAuthorized = app.shilex.android.data.Settings(host.context)
+                .isAutomationEnabled(app.shilex.android.data.AutomationCategory.WhatsAppMessages)
+            val result = WhatsAppWorkflow.deleteMessageInChat(
+                service = service,
+                targetSnippet = snippet,
+                scope = scope,
+                skipInternalConfirm = autoDeleteAuthorized,
+            )
+            return Results.done(result)
         }
     }
 

@@ -148,4 +148,35 @@ class PlayStoreMatcherTest {
             PlayStoreMatcher.resolveFlowState(blockedDecision, alreadyInstalled = true),
         )
     }
+
+    @Test
+    fun detectsScreenStatesAndPreventsRepeatedSearchWhenResultsVisible() {
+        val searchResultsElements = listOf(
+            ScreenElement(1, "button", "Search apps & games", ""),
+            ScreenElement(2, "text", "BookMyShow: Movie Tickets", ""),
+            ScreenElement(3, "text", "Bigtree Entertainment", ""),
+            ScreenElement(4, "button", "Install", ""),
+        )
+        assertEquals(
+            PlayStoreMatcher.PlayStoreScreenState.SearchResults,
+            PlayStoreMatcher.detectScreenState(searchResultsElements),
+        )
+        assertTrue(PlayStoreMatcher.isResultsVisible(searchResultsElements))
+
+        val appDetailsElements = listOf(
+            ScreenElement(1, "text", "BookMyShow: Movie Tickets", ""),
+            ScreenElement(2, "text", "About this app", ""),
+            ScreenElement(3, "button", "Install", ""),
+        )
+        assertEquals(
+            PlayStoreMatcher.PlayStoreScreenState.AppDetails,
+            PlayStoreMatcher.detectScreenState(appDetailsElements),
+        )
+        assertTrue(PlayStoreMatcher.isResultsVisible(appDetailsElements))
+
+        // Match base title "BookMyShow" when subtitle is present
+        val decision = PlayStoreMatcher.analyzeScreen("BookMyShow", searchResultsElements)
+        assertEquals(PlayStoreMatcher.ButtonState.Install, decision.buttonState)
+        assertNotNull(decision.actionElement)
+    }
 }

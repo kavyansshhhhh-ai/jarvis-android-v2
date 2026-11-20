@@ -3,6 +3,7 @@ package app.shilex.android.memory
 import android.content.Context
 import org.json.JSONArray
 import org.json.JSONObject
+import java.util.UUID
 
 /**
  * Notes and routines in JARVIS's private storage on this phone. Never backed up or moved to
@@ -12,12 +13,41 @@ class MemoryStore(context: Context) {
     private val prefs = context.getSharedPreferences("memory", Context.MODE_PRIVATE)
 
     fun notes(): List<Note> = array(NOTES).let { a ->
-        (0 until a.length()).mapNotNull { i -> a.optJSONObject(i)?.let { Note(it.optString("t"), it.optLong("at")) } }
+        (0 until a.length()).mapNotNull { i ->
+            a.optJSONObject(i)?.let { obj ->
+                Note(
+                    text = obj.optString("t"),
+                    atMillis = obj.optLong("at"),
+                    id = obj.optString("id").ifEmpty { UUID.randomUUID().toString() },
+                    updatedAtMillis = obj.optLong("up", obj.optLong("at")),
+                )
+            }
+        }
     }
 
-    fun addNote(text: String) {
-        val kept = (notes() + Note(text, System.currentTimeMillis())).takeLast(MemoryRules.MAX_NOTES)
+    fun addNote(text: String): String {
+        val id = UUID.randomUUID().toString()
+        val kept = (notes() + Note(text, System.currentTimeMillis(), id)).takeLast(MemoryRules.MAX_NOTES)
         saveNotes(kept)
+        return id
+    }
+
+    /** Returns the note with the given [id], or null if not found. */
+    fun getNote(id: String): Note? = notes().firstOrNull { it.id == id }
+
+    /**
+     * Updates the text of an existing note, preserving its [id] and original [atMillis].
+     * Returns true if the note was found and updated; false if no note with [id] exists.
+     * Never duplicates the note.
+     */
+    fun updateNote(id: String, newText: String): Boolean {
+        val all = notes().toMutableList()
+        val idx = all.indexOfFirst { it.id == id }
+        if (idx < 0) return false
+        val existing = all[idx]
+        all[idx] = existing.copy(text = newText, updatedAtMillis = System.currentTimeMillis())
+        saveNotes(all)
+        return true
     }
 
     /** Removes the notes matching [query] (all of them for "all"); returns how many. */
@@ -54,7 +84,13 @@ class MemoryStore(context: Context) {
 
     private fun saveNotes(notes: List<Note>) = prefs.edit().putString(
         NOTES,
-        JSONArray(notes.map { JSONObject().put("t", it.text).put("at", it.atMillis) }).toString(),
+        JSONArray(notes.map { n ->
+            JSONObject()
+                .put("t", n.text)
+                .put("at", n.atMillis)
+                .put("id", n.id)
+                .put("up", n.updatedAtMillis)
+        }).toString(),
     ).apply()
 
     private fun writeRoutines(routines: List<Routine>) = prefs.edit().putString(

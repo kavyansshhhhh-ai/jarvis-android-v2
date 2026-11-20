@@ -61,6 +61,51 @@ object PlayStoreMatcher {
     private val INSTALLED_BADGE_RE = Regex("""^(?:installed|uninstall)$""", RegexOption.IGNORE_CASE)
     private val AUTH_OR_AGE_RE = Regex("""\b(sign in|verify|age|parental|ask to buy|add a payment method|complete account setup|continue payment|password)\b""", RegexOption.IGNORE_CASE)
     private val SEARCH_BAR_RE = Regex("""\b(search\s+apps(?:\s*(?:&|and)\s*games)?|search\s+google\s+play|search\s+for\s+apps)\b""", RegexOption.IGNORE_CASE)
+    private val DETAILS_CUES = Regex("""\b(about this app|about this game|ratings and reviews|ratings & reviews|developer contact|data safety|reviews|whats new|what's new)\b""", RegexOption.IGNORE_CASE)
+    private val RESULTS_CUES = Regex("""\b(results for|similar apps|you might also like|sponsored|top charts|filters|see more results|search results)\b""", RegexOption.IGNORE_CASE)
+
+    enum class PlayStoreScreenState {
+        HomeScreen,
+        SearchInput,
+        SearchResults,
+        AppDetails,
+        InstallingOrProgress,
+        AuthOrRestrictedDialog,
+        Unknown,
+    }
+
+    fun detectScreenState(elements: List<ScreenElement>): PlayStoreScreenState {
+        if (isPaidOrRestricted(elements) != null) return PlayStoreScreenState.AuthOrRestrictedDialog
+        val allLabels = elements.joinToString(" ") { "${it.label} ${it.hint}" }
+        val hasDetailsCue = DETAILS_CUES.containsMatchIn(allLabels)
+        val hasSearchResultsCue = RESULTS_CUES.containsMatchIn(allLabels)
+        val hasSearchInput = findSearchInput(elements) != null
+        val installingBtn = elements.any { el ->
+            el.isEnabled && (el.role == "button" || el.role == "text") && INSTALLING_RE.containsMatchIn(el.label.trim())
+        }
+
+        return when {
+            installingBtn -> PlayStoreScreenState.InstallingOrProgress
+            hasDetailsCue -> PlayStoreScreenState.AppDetails
+            hasSearchResultsCue -> PlayStoreScreenState.SearchResults
+            hasSearchInput && elements.size > 2 -> PlayStoreScreenState.SearchResults
+            hasSearchInput && elements.size <= 2 -> PlayStoreScreenState.HomeScreen
+            elements.any { el -> el.role == "field" && el.isEnabled } -> PlayStoreScreenState.SearchInput
+            else -> PlayStoreScreenState.Unknown
+        }
+    }
+
+    fun isResultsVisible(elements: List<ScreenElement>): Boolean {
+        val state = detectScreenState(elements)
+        if (state == PlayStoreScreenState.SearchResults || state == PlayStoreScreenState.AppDetails) return true
+        val nonSearchListings = elements.filter { el ->
+            el.label.isNotBlank() &&
+                !SEARCH_BAR_RE.containsMatchIn(el.label) &&
+                !el.label.equals("Search", ignoreCase = true) &&
+                el.role != "field"
+        }
+        return nonSearchListings.size >= 2
+    }
 
     fun normalize(text: String): String = AppCatalog.compactKey(text)
 
@@ -119,7 +164,13 @@ object PlayStoreMatcher {
         val listingMatch = scoredListings.firstOrNull()?.first
 
         if (installBtn != null) {
-            return if (listingMatch != null || elements.any { normalize(it.label) == wantedCompact }) {
+            val isGoodMatch = listingMatch != null ||
+                elements.any {
+                    val comp = normalize(it.label)
+                    val baseComp = normalize(it.label.split(Regex("[-:|•,]")).first().trim())
+                    comp == wantedCompact || baseComp == wantedCompact || comp.startsWith(wantedCompact)
+                }
+            return if (isGoodMatch) {
                 ScreenDecision(ButtonState.Install, actionElement = installBtn, matchedListingElement = listingMatch)
             } else {
                 ScreenDecision(
@@ -214,9 +265,12 @@ object PlayStoreMatcher {
                 return@mapNotNull null
             }
             val comp = normalize(lbl)
+            val baseTitle = lbl.split(Regex("[-:|•,]")).first().trim()
+            val baseComp = normalize(baseTitle)
             var score = 0
             when {
                 comp == wantedCompact -> score += 100
+                baseComp == wantedCompact -> score += 95
                 comp.startsWith(wantedCompact) -> score += 75
                 wantedCompact in comp -> score += 50
                 wantedTokens.isNotEmpty() && wantedTokens.all { it in lbl.lowercase() } -> score += 40
@@ -349,7 +403,10 @@ object PlayStoreTools {
             val checker = InstalledAppChecker(host.context)
             var tappedInstall = false
             var confirmedInstall = false
-            var typedSearch = false
+            var typedSearch = true // Launched via market://search intent so search is already submitted
+            var consecutiveSearches = 0
+            var unchangedScreenCount = 0
+            var lastScreenSig = ""
 
             repeat(POLL_STEPS) {
                 delay(STEP_DELAY_MS)
@@ -358,20 +415,35 @@ object PlayStoreTools {
                     flowState = StoreFlowState.OPENING_STORE
                     return@repeat
                 }
+
+                if (snap.signature.isNotEmpty() && snap.signature == lastScreenSig) {
+                    unchangedScreenCount++
+                    if (unchangedScreenCount >= 4 && !tappedInstall) {
+                        Diag.w("playstore: screen unchanged for $unchangedScreenCount cycles; halting loop")
+                        return@repeat
+                    }
+                } else {
+                    unchangedScreenCount = 0
+                    lastScreenSig = snap.signature
+                }
+
                 host.recoveryController.onScreenChanged("${snap.packageName}:${snap.signature.take(32)}")
                 if (snap.sensitiveAuth) {
                     flowState = StoreFlowState.FAILED
                     return "Google Play Store asked for password or account verification. Hand control to the user."
                 }
 
+                val currentScreenState = PlayStoreMatcher.detectScreenState(snap.elements)
+                val resultsAlreadyVisible = PlayStoreMatcher.isResultsVisible(snap.elements)
                 val decision = PlayStoreMatcher.analyzeScreen(appName, snap.elements)
                 val searchEl = PlayStoreMatcher.findSearchInput(snap.elements)
+
                 flowState = PlayStoreMatcher.resolveFlowState(
                     decision = decision,
                     alreadyInstalled = false,
                     inPlayStore = true,
                     hasSearchInput = searchEl != null,
-                    searchSubmitted = typedSearch,
+                    searchSubmitted = typedSearch || resultsAlreadyVisible,
                     tappedInstall = tappedInstall,
                     confirmedInstall = confirmedInstall,
                     verifiedInstalledAfterAction = false,
@@ -451,11 +523,14 @@ object PlayStoreTools {
                                 flowState = StoreFlowState.OPENING_APP_PAGE
                                 Diag.i("playstore: state=$flowState opened listing ${listingEl.label}")
                             }
-                        } else if (!typedSearch && searchEl != null &&
+                        } else if (!resultsAlreadyVisible && currentScreenState != PlayStoreMatcher.PlayStoreScreenState.SearchResults &&
+                            currentScreenState != PlayStoreMatcher.PlayStoreScreenState.AppDetails &&
+                            consecutiveSearches < 1 && searchEl != null &&
                             !host.recoveryController.shouldSkipDuplicate("ps_search_${PlayStoreMatcher.normalize(appName)}", flowState.name, StoreFlowState.WAITING_FOR_RESULTS.name)
                         ) {
                             val searchNode = service.node(searchEl.number)
                             if (searchNode != null) {
+                                consecutiveSearches++
                                 flowState = StoreFlowState.SEARCHING
                                 if (searchNode.isEditable) {
                                     if (service.type(searchNode, appName, submitIme = true)) {

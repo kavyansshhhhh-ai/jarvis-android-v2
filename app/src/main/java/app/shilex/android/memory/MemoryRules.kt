@@ -1,7 +1,12 @@
 package app.shilex.android.memory
 
 /** Something the user asked JARVIS to remember. */
-data class Note(val text: String, val atMillis: Long)
+data class Note(
+    val text: String,
+    val atMillis: Long,
+    val id: String = java.util.UUID.randomUUID().toString(),
+    val updatedAtMillis: Long = atMillis,
+)
 
 /** A named list of plain-language steps ("Good morning"), run with the normal tools and approvals. */
 data class Routine(val name: String, val steps: List<String>)

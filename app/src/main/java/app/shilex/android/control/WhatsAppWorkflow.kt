@@ -159,6 +159,89 @@ object WhatsAppCallMatcher {
 }
 
 /**
+ * Pure WhatsApp message selection and delete dialog matcher (JVM-tested).
+ * Finds message bubbles, identifies the Delete (trash) action in WhatsApp's contextual
+ * action bar, and distinguishes "Delete for everyone" from "Delete for me".
+ */
+object WhatsAppDeleteMatcher {
+    enum class DeleteScope { ForEveryone, ForMe }
+
+    data class DeleteDialogOptions(
+        val forEveryoneElementNumber: Int?,
+        val forMeElementNumber: Int?,
+        val cancelElementNumber: Int?,
+    )
+
+    private val DELETE_ICON_RE = Regex(
+        """\b(delete|trash|remove)\b|menuitem_conversations_delete|action_delete|डिलीट|हटाएं""",
+        RegexOption.IGNORE_CASE,
+    )
+    private val FOR_EVERYONE_RE = Regex(
+        """\b(delete\s+for\s+everyone|delete\s+for\s+all)\b|सभी\s+के\s+लिए\s+हटाएं""",
+        RegexOption.IGNORE_CASE,
+    )
+    private val FOR_ME_RE = Regex(
+        """\b(delete\s+for\s+me)\b|मेरे\s+लिए\s+हटाएं""",
+        RegexOption.IGNORE_CASE,
+    )
+    private val CANCEL_RE = Regex(
+        """\b(cancel)\b|रद्द\s+करें""",
+        RegexOption.IGNORE_CASE,
+    )
+
+    private val CHROME_LABELS = setOf(
+        "type a message", "message", "send", "send voice message", "attach",
+        "camera", "emoji", "back", "navigate up", "more options", "search",
+        "call", "video call", "voice call", "voice note",
+    )
+
+    /** Finds the message bubble element matching [targetSnippet] (or the most recent message if blank). */
+    fun findMessageBubbleNumber(elements: List<ScreenElement>, targetSnippet: String = ""): Int? {
+        val nonChrome = elements.filter { el ->
+            el.role !in setOf("field", "switch on", "switch off") &&
+                el.label.isNotBlank() &&
+                el.label.lowercase().trim() !in CHROME_LABELS
+        }
+        if (targetSnippet.isBlank()) {
+            return nonChrome.lastOrNull()?.number
+        }
+        val cleanSnippet = WhatsAppComposerMatcher.normalize(targetSnippet)
+        val matched = nonChrome.filter { el ->
+            WhatsAppComposerMatcher.normalize(el.label).contains(cleanSnippet)
+        }
+        return matched.lastOrNull()?.number
+    }
+
+    /** Finds the top action bar Delete (trash) button number after a message is selected. */
+    fun findDeleteButtonNumber(elements: List<ScreenElement>, meta: Map<Int, ControlService.NodeMeta>): Int? {
+        return elements.firstOrNull { el ->
+            val m = meta[el.number]
+            val viewId = m?.viewId.orEmpty()
+            val text = "${el.label} $viewId"
+            DELETE_ICON_RE.containsMatchIn(text)
+        }?.number
+    }
+
+    /** Inspects visible elements to identify the dialog options for deletion. */
+    fun inspectDeleteDialog(elements: List<ScreenElement>, meta: Map<Int, ControlService.NodeMeta>): DeleteDialogOptions {
+        var forEveryone: Int? = null
+        var forMe: Int? = null
+        var cancel: Int? = null
+
+        for (el in elements) {
+            val m = meta[el.number]
+            val text = "${el.label} ${m?.viewId.orEmpty()}"
+            when {
+                FOR_EVERYONE_RE.containsMatchIn(text) -> forEveryone = el.number
+                FOR_ME_RE.containsMatchIn(text) -> forMe = el.number
+                CANCEL_RE.containsMatchIn(text) -> cancel = el.number
+            }
+        }
+        return DeleteDialogOptions(forEveryone, forMe, cancel)
+    }
+}
+
+/**
  * Verifies the WhatsApp draft, conversation identity, calling buttons, and executes
  * authorized WhatsApp automation cleanly via Accessibility, checking outcomes honestly.
  */
@@ -325,6 +408,116 @@ object WhatsAppWorkflow {
 
         TaskTracker.verified(false, "Opened chat with $recipient; tap Call in WhatsApp.")
         return "Opened WhatsApp chat with $recipient, but JARVIS couldn't find the exact $kindLabel button. Ask the user to tap it."
+    }
+
+    /**
+     * Executes safe message deletion inside an active WhatsApp chat:
+     * 1. Requires upfront user confirmation.
+     * 2. Selects message bubble via long-click.
+     * 3. Taps the Delete icon.
+     * 4. Inspects the dialog to distinguish "Delete for everyone" vs "Delete for me".
+     * 5. Never blindly clicks "Delete for me" if "Delete for everyone" was requested but unavailable.
+     * 6. Verifies deletion outcome before reporting.
+     */
+    suspend fun deleteMessageInChat(
+        service: ControlService,
+        targetSnippet: String,
+        scope: WhatsAppDeleteMatcher.DeleteScope = WhatsAppDeleteMatcher.DeleteScope.ForEveryone,
+        skipInternalConfirm: Boolean = false,
+    ): String {
+        val scopeDesc = if (scope == WhatsAppDeleteMatcher.DeleteScope.ForEveryone) "Delete for everyone" else "Delete for me"
+        val promptTarget = if (targetSnippet.isNotBlank()) "\"${ScreenText.shorten(targetSnippet)}\"" else "your last message"
+
+        if (!skipInternalConfirm) {
+            val approved = service.overlay.confirm("Delete WhatsApp message: $promptTarget ($scopeDesc)?")
+            if (!approved) {
+                TaskTracker.verified(false, "WhatsApp message deletion cancelled by user.")
+                return "Deletion was not confirmed by the user."
+            }
+        }
+
+        val fg = service.foregroundPackage()
+        if (fg !in WHATSAPP_PACKAGES) {
+            TaskTracker.verified(false, "WhatsApp is not open.")
+            return "WhatsApp is not currently open on screen."
+        }
+
+        val snap = service.snapshot() ?: return "Couldn't read WhatsApp screen."
+        if (snap.sensitiveAuth) {
+            TaskTracker.verified(false, "WhatsApp shows authentication screen.")
+            return "WhatsApp shows an authentication screen. Please unlock WhatsApp first."
+        }
+
+        val bubbleNum = WhatsAppDeleteMatcher.findMessageBubbleNumber(snap.elements, targetSnippet)
+            ?: return "Could not find message matching $promptTarget in the open chat."
+
+        val bubbleNode = service.node(bubbleNum)
+            ?: return "Could not locate message element on screen."
+
+        service.overlay.showActive()
+        val longClicked = service.longClick(bubbleNode)
+        if (!longClicked) {
+            return "Failed to select the message in WhatsApp."
+        }
+        delay(600)
+
+        val actionSnap = service.snapshot() ?: return "Couldn't read screen after selecting message."
+        val deleteIconNum = WhatsAppDeleteMatcher.findDeleteButtonNumber(actionSnap.elements, actionSnap.meta)
+        if (deleteIconNum == null) {
+            return "Delete icon did not appear after selecting the message."
+        }
+        val deleteIconNode = service.node(deleteIconNum) ?: return "Could not access Delete button."
+        if (!service.click(deleteIconNode)) {
+            return "Failed to tap Delete button."
+        }
+        delay(600)
+
+        val dialogSnap = service.snapshot() ?: return "Couldn't read delete options dialog."
+        val options = WhatsAppDeleteMatcher.inspectDeleteDialog(dialogSnap.elements, dialogSnap.meta)
+
+        val targetNum = when (scope) {
+            WhatsAppDeleteMatcher.DeleteScope.ForEveryone -> {
+                if (options.forEveryoneElementNumber == null) {
+                    if (options.forMeElementNumber != null) {
+                        options.cancelElementNumber?.let { cNum -> service.node(cNum)?.let { service.click(it) } }
+                        TaskTracker.verified(false, "'Delete for everyone' not available.")
+                        return "WhatsApp only offers 'Delete for me' for this message (WhatsApp's time limit for deleting for everyone may have passed or this message was sent by someone else). Deletion was cancelled."
+                    }
+                    return "Neither 'Delete for everyone' nor 'Delete for me' was found in the dialog."
+                }
+                options.forEveryoneElementNumber
+            }
+            WhatsAppDeleteMatcher.DeleteScope.ForMe -> {
+                options.forMeElementNumber ?: return "'Delete for me' option was not found in the dialog."
+            }
+        }
+
+        val targetOptionNode = service.node(targetNum) ?: return "Could not access deletion option button."
+        if (!service.click(targetOptionNode)) {
+            return "Failed to confirm deletion option."
+        }
+        delay(800)
+
+        repeat(VERIFY_TRIES) {
+            val postSnap = service.snapshot()
+            if (postSnap != null) {
+                val stillPresent = targetSnippet.isNotBlank() && postSnap.elements.any {
+                    WhatsAppComposerMatcher.normalize(it.label).contains(WhatsAppComposerMatcher.normalize(targetSnippet))
+                }
+                val deletedMarker = postSnap.elements.any {
+                    it.label.contains("You deleted this message", ignoreCase = true) ||
+                        it.label.contains("आपने यह संदेश हटा दिया", ignoreCase = true)
+                }
+                if (!stillPresent || deletedMarker) {
+                    TaskTracker.verified(true, "Deleted WhatsApp message.")
+                    return "Successfully deleted the message in WhatsApp ($scopeDesc) and verified its removal."
+                }
+            }
+            delay(VERIFY_POLL_MS)
+        }
+
+        TaskTracker.verified(false, "Deletion initiated, but verification was inconclusive.")
+        return "Tapped delete in WhatsApp, but could not conclusively verify removal from the chat screen."
     }
 
     private const val OPEN_WAIT_MS = 8_000L

@@ -353,6 +353,15 @@ class ControlService : AccessibilityService() {
         return tap(bounds.exactCenterX(), bounds.exactCenterY())
     }
 
+    fun longClick(node: AccessibilityNodeInfo): Boolean {
+        var target: AccessibilityNodeInfo? = node
+        while (target != null && !target.isLongClickable) target = target.parent
+        if (target?.performAction(AccessibilityNodeInfo.ACTION_LONG_CLICK) == true) return true
+        val bounds = Rect().also(node::getBoundsInScreen)
+        if (bounds.isEmpty || bounds.width() <= 0 || bounds.height() <= 0) return false
+        return swipe(bounds.exactCenterX(), bounds.exactCenterY(), bounds.exactCenterX(), bounds.exactCenterY(), durationMs = 800)
+    }
+
     fun type(node: AccessibilityNodeInfo, text: String, submitIme: Boolean = false): Boolean {
         node.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
         val args = Bundle().apply {

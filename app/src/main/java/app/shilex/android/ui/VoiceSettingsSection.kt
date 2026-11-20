@@ -27,6 +27,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -57,9 +58,11 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.shilex.android.Branding
 import app.shilex.android.assistant.AssistantViewModel
 import app.shilex.android.audio.BundledHindiVoices
+import app.shilex.android.audio.PreviewPlayback
 import app.shilex.android.audio.TtsVoiceInfo
 import app.shilex.android.audio.VoiceClassifier
 import app.shilex.android.audio.VoiceGender
+import app.shilex.android.audio.VoicePreviewState
 import app.shilex.android.data.Settings
 import java.util.Locale
 
@@ -78,7 +81,7 @@ fun JarvisVoiceSubScreen(
     val hindiCatalog by speaker.hindiCatalog.collectAsStateWithLifecycle()
     val isReady by speaker.isTtsReadyState.collectAsStateWithLifecycle()
     val voiceError by speaker.ttsError.collectAsStateWithLifecycle()
-    val previewingVoiceId by speaker.previewingVoiceId.collectAsStateWithLifecycle()
+    val previewPlayback by speaker.previewPlayback.collectAsStateWithLifecycle()
 
     var speakResponses by remember { mutableStateOf(assistant.speakResponses) }
     var rawSelectedVoiceId by remember { mutableStateOf(assistant.ttsVoiceId) }
@@ -212,7 +215,7 @@ fun JarvisVoiceSubScreen(
                         "Loading available Hindi voices…"
                     },
                     selectedVoiceId = effectiveSelectedId,
-                    previewingVoiceId = previewingVoiceId,
+                    previewPlayback = previewPlayback,
                     onSelectVoice = { chosen ->
                         speaker.stopPreview()
                         rawSelectedVoiceId = chosen.id
@@ -238,7 +241,7 @@ fun JarvisVoiceSubScreen(
                         "Loading available Hindi voices…"
                     },
                     selectedVoiceId = effectiveSelectedId,
-                    previewingVoiceId = previewingVoiceId,
+                    previewPlayback = previewPlayback,
                     onSelectVoice = { chosen ->
                         speaker.stopPreview()
                         rawSelectedVoiceId = chosen.id
@@ -326,7 +329,7 @@ private fun VoiceChoiceList(
     accent: Color,
     emptyMessage: String,
     selectedVoiceId: String?,
-    previewingVoiceId: String?,
+    previewPlayback: PreviewPlayback,
     onSelectVoice: (TtsVoiceInfo) -> Unit,
     onPreviewVoice: (String) -> Unit,
     onStopPreview: () -> Unit,
@@ -352,8 +355,11 @@ private fun VoiceChoiceList(
     ) {
         voices.forEach { voice ->
             val isSelected = selectedVoiceId == voice.id
-            val isPreviewing = previewingVoiceId == voice.id
+            val isCurrentVoice = previewPlayback.voiceId == voice.id
+            val isLoading = isCurrentVoice && previewPlayback.state == VoicePreviewState.Loading
+            val isPlaying = isCurrentVoice && previewPlayback.state == VoicePreviewState.Playing
             val rowInteraction = remember(voice.id) { MutableInteractionSource() }
+
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -378,20 +384,31 @@ private fun VoiceChoiceList(
                         color = if (isSelected) PureWhite else PureWhite.copy(alpha = 0.9f),
                         fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
                     )
-                    if (isPreviewing) {
-                        Text(
-                            text = "Playing preview…",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = CoralError,
-                            modifier = Modifier.padding(top = 2.dp),
-                        )
-                    } else if (isSelected) {
-                        Text(
-                            text = "Selected",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = accent,
-                            modifier = Modifier.padding(top = 2.dp),
-                        )
+                    when {
+                        isPlaying -> {
+                            Text(
+                                text = "Playing preview…",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = CoralError,
+                                modifier = Modifier.padding(top = 2.dp),
+                            )
+                        }
+                        isLoading -> {
+                            Text(
+                                text = "Preparing voice…",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = ElectricCyan,
+                                modifier = Modifier.padding(top = 2.dp),
+                            )
+                        }
+                        isSelected -> {
+                            Text(
+                                text = "Selected",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = accent,
+                                modifier = Modifier.padding(top = 2.dp),
+                            )
+                        }
                     }
                 }
 
@@ -436,41 +453,89 @@ private fun VoiceChoiceList(
                 Spacer(Modifier.width(8.dp))
 
                 val previewInteraction = remember(voice.id) { MutableInteractionSource() }
+                val previewBoxBg = when {
+                    isPlaying -> CoralError.copy(alpha = 0.2f)
+                    isLoading -> ElectricCyan.copy(alpha = 0.18f)
+                    else -> Color(0x1EFFFFFF)
+                }
+                val previewBoxBorder = when {
+                    isPlaying -> CoralError.copy(alpha = 0.6f)
+                    isLoading -> ElectricCyan.copy(alpha = 0.6f)
+                    else -> Color(0x33FFFFFF)
+                }
+
                 Box(
                     modifier = Modifier
                         .glassPressScale(previewInteraction)
                         .clip(pillShape)
-                        .background(if (isPreviewing) CoralError.copy(alpha = 0.2f) else Color(0x1EFFFFFF))
-                        .border(
-                            0.8.dp,
-                            if (isPreviewing) CoralError.copy(alpha = 0.6f) else Color(0x33FFFFFF),
-                            pillShape,
-                        )
+                        .background(previewBoxBg)
+                        .border(0.8.dp, previewBoxBorder, pillShape)
                         .clickable(
                             interactionSource = previewInteraction,
                             indication = null,
                         ) {
-                            if (isPreviewing) onStopPreview() else onPreviewVoice(voice.id)
+                            if (isLoading || isPlaying) onStopPreview() else onPreviewVoice(voice.id)
                         }
                         .padding(horizontal = 12.dp, vertical = 7.dp),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    ) {
-                        Icon(
-                            imageVector = if (isPreviewing) Icons.Filled.Close else Icons.Filled.PlayArrow,
-                            contentDescription = if (isPreviewing) "Stop preview" else "Play preview",
-                            tint = if (isPreviewing) CoralError else accent,
-                            modifier = Modifier.size(14.dp),
-                        )
-                        Text(
-                            text = if (isPreviewing) "Stop" else "Play",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = if (isPreviewing) CoralError else PureWhite,
-                            fontWeight = FontWeight.SemiBold,
-                        )
+                    when {
+                        isLoading -> {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            ) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(12.dp),
+                                    strokeWidth = 1.6.dp,
+                                    color = ElectricCyan,
+                                )
+                                Text(
+                                    text = "Loading…",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = ElectricCyan,
+                                    fontWeight = FontWeight.SemiBold,
+                                )
+                            }
+                        }
+                        isPlaying -> {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.Close,
+                                    contentDescription = "Stop preview",
+                                    tint = CoralError,
+                                    modifier = Modifier.size(14.dp),
+                                )
+                                Text(
+                                    text = "Stop",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = CoralError,
+                                    fontWeight = FontWeight.SemiBold,
+                                )
+                            }
+                        }
+                        else -> {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.PlayArrow,
+                                    contentDescription = "Play preview",
+                                    tint = accent,
+                                    modifier = Modifier.size(14.dp),
+                                )
+                                Text(
+                                    text = "Play",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = PureWhite,
+                                    fontWeight = FontWeight.SemiBold,
+                                )
+                            }
+                        }
                     }
                 }
             }

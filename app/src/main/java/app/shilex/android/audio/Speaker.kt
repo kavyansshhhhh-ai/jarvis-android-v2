@@ -25,6 +25,18 @@ import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 
+/** Explicit preview states distinguishing loading model weights vs active audio playback. */
+enum class VoicePreviewState {
+    Idle,
+    Loading,
+    Playing,
+}
+
+data class PreviewPlayback(
+    val voiceId: String? = null,
+    val state: VoicePreviewState = VoicePreviewState.Idle,
+)
+
 /**
  * Unified Audio Output & Speech Engine for JARVIS.
  * Handles both streaming raw PCM chunks (Gemini Live AudioTrack) and native
@@ -85,6 +97,9 @@ class Speaker(private val context: Context? = null) {
 
     private val _speechAmplitude = MutableStateFlow(0f)
     val speechAmplitude: StateFlow<Float> = _speechAmplitude.asStateFlow()
+
+    private val _previewPlayback = MutableStateFlow(PreviewPlayback())
+    val previewPlayback: StateFlow<PreviewPlayback> = _previewPlayback.asStateFlow()
 
     private val _previewingVoiceId = MutableStateFlow<String?>(null)
     val previewingVoiceId: StateFlow<String?> = _previewingVoiceId.asStateFlow()
@@ -285,14 +300,17 @@ class Speaker(private val context: Context? = null) {
             entry?.onInterrupted?.invoke()
         }
         val shouldRestoreSaved = synchronized(ttsStateLock) {
+            val wasPreview = _previewingVoiceId.value != null ||
+                _previewPlayback.value.state != VoicePreviewState.Idle ||
+                (utteranceId != null && utteranceId.startsWith("preview_"))
             if (utteranceId != null && utteranceId != activeUtteranceId) {
-                return
+                return@synchronized false
             }
-            val wasPreview = _previewingVoiceId.value != null || (utteranceId != null && utteranceId.startsWith("preview_"))
             activeUtteranceId = null
             _isSpeaking.value = false
             _speechAmplitude.value = 0f
             if (wasPreview) {
+                _previewPlayback.value = PreviewPlayback()
                 _previewingVoiceId.value = null
             }
             wasPreview
@@ -383,6 +401,11 @@ class Speaker(private val context: Context? = null) {
 
         val settings = Settings(ctx)
         val targetVoiceId = settings.ttsVoiceId
+
+        // If a bundled offline voice is selected, it takes precedence and Android TTS voice doesn't override it
+        if (targetVoiceId != null && BundledHindiVoices.find(targetVoiceId) != null) {
+            return
+        }
 
         // 1. Voice profile selection (prefer genuine installed offline Hindi hi-IN voices)
         val allVoices = runCatching { engine.voices }.getOrNull()
@@ -565,7 +588,7 @@ class Speaker(private val context: Context? = null) {
     }
 
     /**
-     * Speaks a short Hindi sample sentence in the target voice profile without changing
+     * Speaks a short natural Hindi preview sentence in the target voice profile without changing
      * the permanent selected assistant voice setting. Cancels any active preview immediately.
      */
     fun previewVoice(
@@ -573,7 +596,11 @@ class Speaker(private val context: Context? = null) {
         sampleText: String? = null,
         onComplete: (() -> Unit)? = null,
     ) {
-        stopTts()
+        // 1. Immediately cancel any running or queued playback/preview
+        stopPreviewInternal(clearSavedVoice = false)
+
+        val previewSentence = sampleText?.ifBlank { null }
+            ?: "नमस्ते! मैं आपकी कैसे मदद कर सकता हूँ?"
 
         val bundledVoice = BundledHindiVoices.find(voiceId)
         val offlineEngine = offlineHindiEngine
@@ -597,17 +624,17 @@ class Speaker(private val context: Context? = null) {
                 }
                 _ttsError.value = null
                 activeUtteranceId = utteranceId
+                _previewPlayback.value = PreviewPlayback(voiceId, VoicePreviewState.Loading)
                 _previewingVoiceId.value = voiceId
-                _isSpeaking.value = true
-                _speechAmplitude.value = 0.25f
+                _isSpeaking.value = false
+                _speechAmplitude.value = 0f
                 g
             }
 
-            val textToSpeak = sampleText ?: VoiceClassifier.sampleTextForLocale(bundledVoice.locale)
             val rate = appContext?.let { Settings(it).ttsSpeechRate } ?: 1.0f
             speakBundledOffline(
                 voice = bundledVoice,
-                text = textToSpeak,
+                text = previewSentence,
                 speed = rate,
                 utteranceId = utteranceId,
                 gen = gen,
@@ -626,9 +653,10 @@ class Speaker(private val context: Context? = null) {
                 }
                 _ttsError.value = null
                 activeUtteranceId = pendingId
+                _previewPlayback.value = PreviewPlayback(voiceId, VoicePreviewState.Loading)
                 _previewingVoiceId.value = voiceId
-                _isSpeaking.value = true
-                _speechAmplitude.value = 0.1f
+                _isSpeaking.value = false
+                _speechAmplitude.value = 0f
                 g
             }
             initTts { ok ->
@@ -638,11 +666,12 @@ class Speaker(private val context: Context? = null) {
                     return@initTts
                 }
                 if (ok) {
-                    startSystemVoicePreview(voiceId, sampleText, pendingId, requestGen)
+                    startSystemVoicePreview(voiceId, previewSentence, pendingId, requestGen)
                 } else {
                     synchronized(ttsStateLock) {
                         if (activeUtteranceId == pendingId) {
                             activeUtteranceId = null
+                            _previewPlayback.value = PreviewPlayback()
                             _previewingVoiceId.value = null
                             _isSpeaking.value = false
                             _speechAmplitude.value = 0f
@@ -661,9 +690,15 @@ class Speaker(private val context: Context? = null) {
             if (onComplete != null) {
                 utteranceCallbacks[utteranceId] = UtteranceEntry(g, onComplete, onComplete)
             }
+            _ttsError.value = null
+            activeUtteranceId = utteranceId
+            _previewPlayback.value = PreviewPlayback(voiceId, VoicePreviewState.Loading)
+            _previewingVoiceId.value = voiceId
+            _isSpeaking.value = false
+            _speechAmplitude.value = 0f
             g
         }
-        startSystemVoicePreview(voiceId, sampleText, utteranceId, gen)
+        startSystemVoicePreview(voiceId, previewSentence, utteranceId, gen)
     }
 
     private fun startSystemVoicePreview(
@@ -682,6 +717,7 @@ class Speaker(private val context: Context? = null) {
             synchronized(ttsStateLock) {
                 if (activeUtteranceId == utteranceId) {
                     activeUtteranceId = null
+                    _previewPlayback.value = PreviewPlayback()
                     _previewingVoiceId.value = null
                     _isSpeaking.value = false
                     _speechAmplitude.value = 0f
@@ -697,6 +733,7 @@ class Speaker(private val context: Context? = null) {
             synchronized(ttsStateLock) {
                 if (activeUtteranceId == utteranceId) {
                     activeUtteranceId = null
+                    _previewPlayback.value = PreviewPlayback()
                     _previewingVoiceId.value = null
                     _isSpeaking.value = false
                     _speechAmplitude.value = 0f
@@ -712,6 +749,7 @@ class Speaker(private val context: Context? = null) {
             synchronized(ttsStateLock) {
                 if (activeUtteranceId == utteranceId) {
                     activeUtteranceId = null
+                    _previewPlayback.value = PreviewPlayback()
                     _previewingVoiceId.value = null
                     _isSpeaking.value = false
                     _speechAmplitude.value = 0f
@@ -732,6 +770,7 @@ class Speaker(private val context: Context? = null) {
             synchronized(ttsStateLock) {
                 if (activeUtteranceId == utteranceId) {
                     activeUtteranceId = null
+                    _previewPlayback.value = PreviewPlayback()
                     _previewingVoiceId.value = null
                     _isSpeaking.value = false
                     _speechAmplitude.value = 0f
@@ -749,6 +788,7 @@ class Speaker(private val context: Context? = null) {
             } else {
                 _ttsError.value = null
                 activeUtteranceId = utteranceId
+                _previewPlayback.value = PreviewPlayback(voiceId, VoicePreviewState.Playing)
                 _previewingVoiceId.value = voiceId
                 _isSpeaking.value = true
                 _speechAmplitude.value = 0.45f
@@ -770,6 +810,7 @@ class Speaker(private val context: Context? = null) {
             synchronized(ttsStateLock) {
                 if (activeUtteranceId == utteranceId) {
                     activeUtteranceId = null
+                    _previewPlayback.value = PreviewPlayback()
                     _previewingVoiceId.value = null
                     _isSpeaking.value = false
                     _speechAmplitude.value = 0f
@@ -805,10 +846,9 @@ class Speaker(private val context: Context? = null) {
                         _ttsError.value = null
                         activeUtteranceId = utteranceId
                         if (isPreview) {
+                            _previewPlayback.value = PreviewPlayback(voice.id, VoicePreviewState.Loading)
                             _previewingVoiceId.value = voice.id
                         }
-                        _isSpeaking.value = true
-                        _speechAmplitude.value = 0.45f
                         true
                     }
                 }
@@ -825,6 +865,7 @@ class Speaker(private val context: Context? = null) {
                 var activeRate = voice.sampleRate
                 val lastWriteDoneMs = AtomicLong(0L)
                 val writeFailed = AtomicBoolean(false)
+                var firstChunkStarted = false
 
                 val outcome = offlineEngine.synthesizeStreaming(
                     voice = voice,
@@ -843,7 +884,22 @@ class Speaker(private val context: Context? = null) {
                         val chunkDurationMs = frames * 1000L / activeRate
                         val nowMs = SystemClock.elapsedRealtime()
                         audibleUntil = maxOf(audibleUntil, nowMs) + chunkDurationMs + 80L
-                        _speechAmplitude.value = chunk.peakAmplitude
+
+                        if (!firstChunkStarted) {
+                            firstChunkStarted = true
+                            synchronized(ttsStateLock) {
+                                if (gen == ttsGeneration) {
+                                    if (isPreview) {
+                                        _previewPlayback.value = PreviewPlayback(voice.id, VoicePreviewState.Playing)
+                                        _previewingVoiceId.value = voice.id
+                                    }
+                                    _isSpeaking.value = true
+                                }
+                            }
+                        }
+                        if (gen == ttsGeneration) {
+                            _speechAmplitude.value = chunk.peakAmplitude
+                        }
 
                         val pcmGen = generation
                         writer.execute {
@@ -872,6 +928,10 @@ class Speaker(private val context: Context? = null) {
                     synchronized(ttsStateLock) {
                         if (gen == ttsGeneration) {
                             _ttsError.value = outcome.userMessage
+                            if (isPreview) {
+                                _previewPlayback.value = PreviewPlayback()
+                                _previewingVoiceId.value = null
+                            }
                         }
                     }
                     handleUtteranceFinished(utteranceId, completedNaturally = false)
@@ -882,6 +942,10 @@ class Speaker(private val context: Context? = null) {
                     synchronized(ttsStateLock) {
                         if (gen == ttsGeneration) {
                             _ttsError.value = "${voice.displayName} produced no audio frames."
+                            if (isPreview) {
+                                _previewPlayback.value = PreviewPlayback()
+                                _previewingVoiceId.value = null
+                            }
                         }
                     }
                     handleUtteranceFinished(utteranceId, completedNaturally = false)
@@ -896,6 +960,10 @@ class Speaker(private val context: Context? = null) {
                     synchronized(ttsStateLock) {
                         if (gen == ttsGeneration) {
                             _ttsError.value = "Could not play audio on this phone's speaker."
+                            if (isPreview) {
+                                _previewPlayback.value = PreviewPlayback()
+                                _previewingVoiceId.value = null
+                            }
                         }
                     }
                     handleUtteranceFinished(utteranceId, completedNaturally = false)
@@ -923,6 +991,10 @@ class Speaker(private val context: Context? = null) {
                 synchronized(ttsStateLock) {
                     if (gen == ttsGeneration) {
                         _ttsError.value = if (isPreview) "Could not play voice preview." else "Voice playback could not speak this reply."
+                        if (isPreview) {
+                            _previewPlayback.value = PreviewPlayback()
+                            _previewingVoiceId.value = null
+                        }
                     }
                 }
                 handleUtteranceFinished(utteranceId, completedNaturally = false)
@@ -931,12 +1003,41 @@ class Speaker(private val context: Context? = null) {
     }
 
     fun stopPreview() {
+        stopPreviewInternal(clearSavedVoice = true)
+    }
+
+    private fun stopPreviewInternal(clearSavedVoice: Boolean) {
         val wasPreviewing = synchronized(ttsStateLock) {
-            _previewingVoiceId.value != null || activeUtteranceId?.startsWith("preview_") == true
+            val isPrev = _previewingVoiceId.value != null ||
+                _previewPlayback.value.state != VoicePreviewState.Idle ||
+                activeUtteranceId?.startsWith("preview_") == true
+            if (isPrev) {
+                ttsGeneration++
+                activeUtteranceId = null
+                _isSpeaking.value = false
+                _speechAmplitude.value = 0f
+                _previewPlayback.value = PreviewPlayback()
+                _previewingVoiceId.value = null
+            }
+            isPrev
         }
         if (wasPreviewing) {
-            stopTts()
-            applySavedVoiceAndSettings()
+            runCatching { tts?.stop() }
+            if (!replyOpen) {
+                generation++
+                audibleUntil = 0L
+                writer.execute {
+                    resetTrackSafely()
+                    clearRing()
+                }
+            }
+            val pendingPreviewIds = utteranceCallbacks.keys.filter { it.startsWith("preview_") }
+            pendingPreviewIds.forEach { id -> utteranceCallbacks.remove(id)?.onInterrupted?.invoke() }
+            AudioPlaybackState.onLocalTtsEnded()
+            abandonAudioFocus()
+            if (clearSavedVoice) {
+                applySavedVoiceAndSettings()
+            }
         }
     }
 
@@ -972,6 +1073,7 @@ class Speaker(private val context: Context? = null) {
         synchronized(ttsStateLock) {
             ttsGeneration++
             activeUtteranceId = null
+            _previewPlayback.value = PreviewPlayback()
             _previewingVoiceId.value = null
             _isSpeaking.value = false
             _speechAmplitude.value = 0f
@@ -996,6 +1098,7 @@ class Speaker(private val context: Context? = null) {
             activeUtteranceId = null
             _isSpeaking.value = false
             _speechAmplitude.value = 0f
+            _previewPlayback.value = PreviewPlayback()
             _previewingVoiceId.value = null
         }
         runCatching { tts?.stop() }

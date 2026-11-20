@@ -15,7 +15,7 @@ import java.time.format.DateTimeFormatter
  * Memory ("remember I parked on level 2"), Personal Profile preferences, and routines ("Good morning"), kept on this phone.
  */
 object MemoryTools {
-    fun all(): List<PhoneTool> = listOf(GetPersonalProfile, Remember, Recall, Forget, RoutineSave, RoutineRun)
+    fun all(): List<PhoneTool> = listOf(GetPersonalProfile, Remember, Recall, Forget, NoteEdit, RoutineSave, RoutineRun)
 
     private object GetPersonalProfile : PhoneTool {
         override val name = "get_personal_profile"
@@ -45,9 +45,9 @@ object MemoryTools {
             if (MemoryRules.looksSecret(note)) {
                 return Results.failed("secret", "That looks like a password, PIN, code or card number. Say it isn't kept, for the user's safety.")
             }
-            MemoryStore(host.context).addNote(note)
-            Diag.i("memory: note saved")
-            return Results.done("Remembered on this phone.")
+            val id = MemoryStore(host.context).addNote(note)
+            Diag.i("memory: note saved id=$id")
+            return Results.done("Remembered on this phone. Note ID: $id")
         }
     }
 
@@ -63,7 +63,7 @@ object MemoryTools {
         override suspend fun run(args: JSONObject, host: ToolHost): JSONObject {
             val found = MemoryRules.find(args.text("query"), MemoryStore(host.context).notes())
             if (found.isEmpty()) return Results.done("Nothing remembered about that.")
-            return Results.done(found.joinToString("\n") { "- ${it.text} (saved ${DAY.format(Instant.ofEpochMilli(it.atMillis).atZone(ZoneId.systemDefault()))})" })
+            return Results.done(found.joinToString("\n") { "- [id:${it.id}] ${it.text} (saved ${DAY.format(Instant.ofEpochMilli(it.atMillis).atZone(ZoneId.systemDefault()))})" })
         }
     }
 
@@ -79,6 +79,32 @@ object MemoryTools {
         override suspend fun run(args: JSONObject, host: ToolHost): JSONObject {
             val gone = MemoryStore(host.context).forget(args.text("query"))
             return if (gone == 0) Results.done("No note matched; nothing deleted.") else Results.done("Deleted $gone note(s).")
+        }
+    }
+
+    private object NoteEdit : PhoneTool {
+        override val name = "note_edit"
+
+        override fun declaration() = Schema.function(
+            name,
+            "Updates the text of an existing note by its ID (from recall). Preserves the note's ID and creation date; never creates a duplicate.",
+            Schema.string("id", "The note's ID as returned by remember or recall.", required = true),
+            Schema.string("note", "The new note text.", required = true),
+        )
+
+        override suspend fun run(args: JSONObject, host: ToolHost): JSONObject {
+            val id = args.text("id").ifEmpty { return Results.failed("no_id", "Provide the note ID from recall.") }
+            val newText = args.text("note").take(MemoryRules.MAX_LENGTH).ifEmpty { return Results.failed("empty", "Ask what the note should say.") }
+            if (MemoryRules.looksSecret(newText)) {
+                return Results.failed("secret", "That looks like a password, PIN, code or card number. It won't be saved.")
+            }
+            val store = MemoryStore(host.context)
+            if (store.getNote(id) == null) {
+                return Results.failed("not_found", "No note found with ID '$id'. Use recall to find the right ID.")
+            }
+            val updated = store.updateNote(id, newText)
+            Diag.i("memory: note updated id=$id updated=$updated")
+            return if (updated) Results.done("Note updated.") else Results.failed("update_failed", "Could not update note with ID '$id'.")
         }
     }
 

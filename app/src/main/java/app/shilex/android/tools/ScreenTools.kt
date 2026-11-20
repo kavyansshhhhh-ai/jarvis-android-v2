@@ -191,7 +191,7 @@ object ScreenTools {
                 return accessibilityRestricted(snap.appLabel)
             }
             ActiveTaskContext.updateScreen(snap.appLabel, snap.signature.take(80))
-            host.recoveryController.onScreenChanged("${snap.packageName}:${snap.signature.take(32)}")
+            host.recoveryController.onScreenChanged("${snap.packageName}:${snap.appLabel}")
             val summary = if (snap.financeApp) ControlRules.extractTransactionSummary(snap.elements) else ""
             val hints = screenContextHints(snap)
             val body = ScreenText.describe(snap.appLabel, snap.elements, snap.more)
@@ -278,7 +278,7 @@ object ScreenTools {
             val explicitNumber = args.optInt("number", 0)
             val preSnap = service.snapshot(allowPlayStore = allowPs)
             if (preSnap != null) {
-                host.recoveryController.onScreenChanged("${preSnap.packageName}:${preSnap.signature.take(32)}")
+                host.recoveryController.onScreenChanged("${preSnap.packageName}:${preSnap.appLabel}")
             }
 
             // Short-circuit Instagram navigation commands when already at the requested destination.
@@ -331,8 +331,11 @@ object ScreenTools {
                 null
             }
             val expectedDestKey = igExpectedIntent?.name ?: label
-            val currentScreenKey = "${pkg}:${preSnap?.signature?.take(24).orEmpty()}"
+            val currentScreenKey = "${pkg}:${preSnap?.appLabel.orEmpty()}"
             val actionId = if (explicitNumber > 0) "click:#$explicitNumber" else "click:${requestedLabel.lowercase()}"
+            if (host.recoveryController.isCycleDetected()) {
+                return Results.failed("navigation_cycle", "A navigation loop was detected (bouncing between screens). Stop retrying and ask the user what to do next.")
+            }
             if (host.recoveryController.shouldSkipDuplicate(actionId, currentScreenKey, expectedDestKey)) {
                 return Results.done("Skipped duplicate action on \"${ScreenText.shorten(label.ifEmpty { requestedLabel })}\" on the unchanged screen.")
             }
@@ -450,7 +453,7 @@ object ScreenTools {
                 )
             }
             ActiveTaskContext.updateScreen(snap.appLabel, snap.signature.take(80))
-            recovery.onScreenChanged("${snap.packageName}:${snap.signature.take(32)}")
+            recovery.onScreenChanged("${snap.packageName}:${snap.appLabel}")
             val statusPrefix = if (verification.isSuccessful) {
                 "$did Verified: ${verification.message} "
             } else {
