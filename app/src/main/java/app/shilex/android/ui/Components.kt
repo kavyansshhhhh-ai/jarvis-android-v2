@@ -108,6 +108,7 @@ fun GlassRowIcon(
 ) {
     val iconShape = remember { RoundedCornerShape(10.dp) }
     val neutralBackground = NeutralRowIconBgGradient
+    val neutralBorder = NeutralRowIconBorderGradient
     val bgBrush = remember(tint, accentGlow, neutralBackground) {
         if (accentGlow) {
             Brush.verticalGradient(listOf(tint.copy(alpha = 0.24f), tint.copy(alpha = 0.10f)))
@@ -115,11 +116,11 @@ fun GlassRowIcon(
             neutralBackground
         }
     }
-    val borderBrush = remember(tint, accentGlow) {
+    val borderBrush = remember(tint, accentGlow, neutralBorder) {
         if (accentGlow) {
             Brush.verticalGradient(listOf(tint.copy(alpha = 0.45f), Color(0x14FFFFFF)))
         } else {
-            NeutralRowIconBorderGradient
+            neutralBorder
         }
     }
     Box(
