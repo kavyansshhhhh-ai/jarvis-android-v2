@@ -9,9 +9,9 @@ import org.junit.Test
 class GalleryDeleteTest {
 
     private val samplePhotos = listOf(
-        MediaPhoto(id = 101, displayName = "IMG_20261115_120000.jpg", relativePath = "DCIM/Camera/", dateModifiedSec = 2000L),
-        MediaPhoto(id = 102, displayName = "Screenshot_20261115.png", relativePath = "Pictures/Screenshots/", dateModifiedSec = 1500L),
-        MediaPhoto(id = 103, displayName = "family_vacation.jpg", relativePath = "DCIM/Camera/", dateModifiedSec = 1000L),
+        MediaPhoto(id = 101, displayName = "IMG_20261115_120000.jpg", relativePath = "DCIM/Camera/", dateModifiedSec = 2000L, width = 4000, height = 3000, sizeBytes = 2_400_000L),
+        MediaPhoto(id = 102, displayName = "Screenshot_20261115.png", relativePath = "Pictures/Screenshots/", dateModifiedSec = 1500L, width = 1080, height = 2400, sizeBytes = 480_000L),
+        MediaPhoto(id = 103, displayName = "family_vacation.jpg", relativePath = "DCIM/Camera/", dateModifiedSec = 1000L, width = 3000, height = 2000, sizeBytes = 1_200_000L),
     )
 
     @Test
@@ -51,5 +51,20 @@ class GalleryDeleteTest {
     fun returnsNoneWhenNotFound() {
         val res = GalleryPhotoMatcher.resolve("non_existent_file.png", samplePhotos)
         assertTrue(res is Resolution.None)
+    }
+
+    @Test
+    fun searchesByAlbumKeywordAndFormatsMetadata() {
+        val screenshots = GalleryPhotoMatcher.searchPhotos("screenshot", samplePhotos)
+        assertEquals(1, screenshots.size)
+        assertEquals(102L, screenshots.single().id)
+
+        val cameraPhotos = GalleryPhotoMatcher.searchPhotos("camera", samplePhotos)
+        assertEquals(listOf(101L, 103L), cameraPhotos.map { it.id })
+
+        val summary = GalleryPhotoMatcher.formatMetadataSummary(samplePhotos[0])
+        assertTrue(summary.contains("IMG_20261115_120000.jpg"))
+        assertTrue(summary.contains("DCIM/Camera"))
+        assertTrue(summary.contains("4000x3000"))
     }
 }

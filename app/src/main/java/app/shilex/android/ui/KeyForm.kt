@@ -69,7 +69,7 @@ fun KeyForm(onSave: suspend (String) -> String?) {
             shape = RoundedCornerShape(18.dp),
             colors = OutlinedTextFieldDefaults.colors(
                 focusedBorderColor = ElectricCyan,
-                unfocusedBorderColor = Color(0x33FFFFFF),
+                unfocusedBorderColor = GlassBorderSubtle,
                 focusedLabelColor = ElectricCyan,
                 unfocusedLabelColor = Muted,
                 focusedTextColor = PureWhite,
@@ -98,9 +98,9 @@ fun KeyForm(onSave: suspend (String) -> String?) {
             shape = RoundedCornerShape(50),
             colors = ButtonDefaults.buttonColors(
                 containerColor = ElectricCyan,
-                contentColor = Color(0xFF001E26),
-                disabledContainerColor = Color(0x2638E5FF),
-                disabledContentColor = Color(0x66FFFFFF),
+                contentColor = MaterialTheme.colorScheme.onPrimary,
+                disabledContainerColor = ElectricCyan.copy(alpha = 0.22f),
+                disabledContentColor = Muted,
             ),
             modifier = Modifier.fillMaxWidth().height(52.dp),
         ) {

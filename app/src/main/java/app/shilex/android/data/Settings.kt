@@ -74,6 +74,11 @@ class Settings(context: Context) {
         get() = AppearanceMode.from(prefs.getString(PREF_APPEARANCE_MODE, AppearanceMode.Dark.name))
         set(value) = prefs.edit().putString(PREF_APPEARANCE_MODE, value.name).apply()
 
+    /** iOS-inspired Liquid Glass styling. Enabled by default for new installations. */
+    var liquidGlassEnabled: Boolean
+        get() = prefs.getBoolean(PREF_LIQUID_GLASS, DEFAULT_LIQUID_GLASS_ENABLED)
+        set(value) = prefs.edit().putBoolean(PREF_LIQUID_GLASS, value).apply()
+
     fun isAutomationEnabled(category: AutomationCategory): Boolean =
         prefs.getBoolean(category.key, category.defaultEnabled)
 
@@ -228,9 +233,9 @@ class Settings(context: Context) {
         get() = prefs.getString("home_city", "") ?: ""
         set(value) = prefs.edit().putString("home_city", value).apply()
 
-    /** Calls [onChange] after any setting changes, from any screen or the notification. */
-    fun watch(onChange: () -> Unit): SharedPreferences.OnSharedPreferenceChangeListener =
-        SharedPreferences.OnSharedPreferenceChangeListener { _, _ -> onChange() }
+    /** Calls [onChange] after any setting changes, passing the changed key. */
+    fun watchKeyed(onChange: (String?) -> Unit): SharedPreferences.OnSharedPreferenceChangeListener =
+        SharedPreferences.OnSharedPreferenceChangeListener { _, key -> onChange(key) }
             .also(prefs::registerOnSharedPreferenceChangeListener)
 
     fun unwatch(listener: SharedPreferences.OnSharedPreferenceChangeListener) =
@@ -240,6 +245,8 @@ class Settings(context: Context) {
 
     companion object {
         const val PREF_APPEARANCE_MODE = "appearance_mode"
+        const val PREF_LIQUID_GLASS = "liquid_glass_enabled"
+        const val DEFAULT_LIQUID_GLASS_ENABLED = true
         const val DEFAULT_MODEL = "gemini-3.1-flash-live-preview"
         const val GENDER_FEMALE = "FEMALE"
         const val GENDER_MALE = "MALE"

@@ -7,6 +7,7 @@ import android.os.PowerManager
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import app.shilex.android.audio.Speaker
+import app.shilex.android.data.AppearanceMode
 import app.shilex.android.data.AutomationCategory
 import app.shilex.android.data.PersonalProfile
 import app.shilex.android.data.PersonalProfileStore
@@ -65,8 +66,14 @@ class AssistantViewModel(app: Application) : AndroidViewModel(app) {
     /** Synchronized voice indicator state (OFF, LISTENING, PROCESSING, SPEAKING, INTERRUPTED, IDLE_TIMEOUT). */
     val voiceIndicator: StateFlow<VoiceIndicatorSnapshot> = VoiceIndicator.state
 
-    private val _personalProfile = MutableStateFlow(profileStore.load())
+    private val _personalProfile = MutableStateFlow(PersonalProfile())
     val personalProfile: StateFlow<PersonalProfile> = _personalProfile.asStateFlow()
+
+    private val _appearanceMode = MutableStateFlow(settings.appearanceMode)
+    val appearanceModeState: StateFlow<AppearanceMode> = _appearanceMode.asStateFlow()
+
+    private val _liquidGlassEnabled = MutableStateFlow(settings.liquidGlassEnabled)
+    val liquidGlassEnabledState: StateFlow<Boolean> = _liquidGlassEnabled.asStateFlow()
 
     private val _installedApps = MutableStateFlow(InstalledAppsRegistry.cachedApps())
     val installedApps: StateFlow<List<InstalledAppInfo>> = _installedApps.asStateFlow()
@@ -90,8 +97,9 @@ class AssistantViewModel(app: Application) : AndroidViewModel(app) {
     val ttsPitchState: StateFlow<Float> = _ttsPitch.asStateFlow()
 
     init {
-        if (_installedApps.value.isEmpty()) {
-            viewModelScope.launch(Dispatchers.IO) {
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching { profileStore.load() }.getOrNull()?.let { _personalProfile.value = it }
+            if (_installedApps.value.isEmpty()) {
                 val resolved = runCatching { InstalledAppsRegistry.apps(app) }.getOrDefault(emptyList())
                 if (resolved.isNotEmpty()) _installedApps.value = resolved
             }
@@ -99,15 +107,22 @@ class AssistantViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     // Android holds preference listeners weakly, so keep this one referenced.
-    private val watcher = settings.watch {
-        _wakeWord.value = settings.wakeWord
-        _wakeDotSize.value = WakeDotSize.fromDp(settings.wakeDotSizeDp)
-        _speakResponses.value = settings.speakResponses
-        _ttsVoiceId.value = settings.ttsVoiceId
-        _ttsGenderFilter.value = settings.ttsGenderFilter
-        _ttsSpeechRate.value = settings.ttsSpeechRate
-        _ttsPitch.value = settings.ttsPitch
-        VoiceService.syncState(app)
+    private val watcher = settings.watchKeyed { key ->
+        when (key) {
+            null, "wake_word" -> {
+                _wakeWord.value = settings.wakeWord
+                VoiceService.syncState(app)
+            }
+            "wake_dot_size", "wake_dot_size_dp" -> _wakeDotSize.value = WakeDotSize.fromDp(settings.wakeDotSizeDp)
+            "speak_responses" -> _speakResponses.value = settings.speakResponses
+            "tts_voice_id" -> _ttsVoiceId.value = settings.ttsVoiceId
+            "tts_gender_filter" -> _ttsGenderFilter.value = settings.ttsGenderFilter
+            "tts_speech_rate" -> _ttsSpeechRate.value = settings.ttsSpeechRate
+            "tts_pitch" -> _ttsPitch.value = settings.ttsPitch
+            Settings.PREF_APPEARANCE_MODE -> _appearanceMode.value = settings.appearanceMode
+            Settings.PREF_LIQUID_GLASS -> _liquidGlassEnabled.value = settings.liquidGlassEnabled
+            "local_commands", "network_speech" -> VoiceService.syncState(app)
+        }
     }
 
     override fun onCleared() {
@@ -167,6 +182,20 @@ class AssistantViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun forgetLearned() = habits.forget()
+
+    var appearanceMode: AppearanceMode
+        get() = _appearanceMode.value
+        set(value) {
+            settings.appearanceMode = value
+            _appearanceMode.value = value
+        }
+
+    var liquidGlassEnabled: Boolean
+        get() = _liquidGlassEnabled.value
+        set(value) {
+            settings.liquidGlassEnabled = value
+            _liquidGlassEnabled.value = value
+        }
 
     var onboarded: Boolean
         get() = settings.onboarded

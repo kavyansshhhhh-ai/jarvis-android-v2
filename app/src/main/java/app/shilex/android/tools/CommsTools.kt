@@ -192,21 +192,14 @@ object CommsTools {
             val link = Uri.parse("https://api.whatsapp.com/send?phone=$digits&text=${Uri.encode(message)}")
             val intent = Intent(Intent.ACTION_VIEW, link)
             val service = ControlService.instance?.takeIf { !it.overlay.stopped }
-            val autoSendAuthorized = AppSettings(host.context).isAutomationEnabled(AutomationCategory.WhatsAppMessages)
-
             if (service != null) {
-                val promptMsg = if (autoSendAuthorized) {
-                    "Opening WhatsApp chat with ${to.name} to send \"$message\" and verify delivery."
-                } else {
-                    "WhatsApp will open with your draft to ${to.name}, then ${Branding.ASSISTANT_NAME} will ask you to tap Allow before pressing Send. " +
-                        "Wait until confirmation before saying it was sent."
-                }
+                val promptMsg = "WhatsApp is opening with your draft to ${to.name}. ${Branding.ASSISTANT_NAME} will ask your confirmation before tapping Send."
                 return host.openApp(intent, "WhatsApp", promptMsg) {
                     WhatsAppWorkflow.confirmAndSendAfterOpen(
                         service = service,
                         recipient = to.name,
                         message = message,
-                        skipInternalConfirm = autoSendAuthorized,
+                        skipInternalConfirm = false,
                     )
                 }
             }
@@ -405,13 +398,11 @@ object CommsTools {
             } else {
                 WhatsAppDeleteMatcher.DeleteScope.ForEveryone
             }
-            val autoDeleteAuthorized = app.shilex.android.data.Settings(host.context)
-                .isAutomationEnabled(app.shilex.android.data.AutomationCategory.WhatsAppMessages)
             val result = WhatsAppWorkflow.deleteMessageInChat(
                 service = service,
                 targetSnippet = snippet,
                 scope = scope,
-                skipInternalConfirm = autoDeleteAuthorized,
+                skipInternalConfirm = false,
             )
             return Results.done(result)
         }

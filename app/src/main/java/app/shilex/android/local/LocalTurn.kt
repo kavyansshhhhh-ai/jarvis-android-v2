@@ -89,14 +89,17 @@ class LocalTurn private constructor(private val context: Context) {
         VoiceService.start(context) // stops the wake listener so the recogniser gets the mic
         musicPause.pause()
         warmUpVoice()
-        main.postDelayed({ listen(kind) }, MIC_HANDOVER_MS)
+        main.removeCallbacksAndMessages(LISTEN_TOKEN)
+        main.postDelayed({ listen(kind) }, LISTEN_TOKEN, MIC_HANDOVER_MS)
         return true
     }
 
     private fun listen(kind: String) {
+        if (!active) return
         if (kind == "offline") {
             Diag.i("local: listening (offline speech)")
             offline.listen { texts ->
+                if (!active) return@listen
                 heardAt = SystemClock.elapsedRealtime()
                 if (texts.isEmpty()) {
                     Diag.i("local: heard nothing")
@@ -131,6 +134,10 @@ class LocalTurn private constructor(private val context: Context) {
 
     private inner class Listener : RecognitionListener {
         override fun onResults(results: Bundle?) {
+            if (!active) {
+                closeRecognizer()
+                return
+            }
             heardAt = SystemClock.elapsedRealtime()
             val texts = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION).orEmpty()
             closeRecognizer()
@@ -139,6 +146,7 @@ class LocalTurn private constructor(private val context: Context) {
 
         override fun onError(error: Int) {
             closeRecognizer()
+            if (!active) return
             when (error) {
                 SpeechRecognizer.ERROR_NO_MATCH, SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> {
                     Diag.i("local: heard nothing (error $error)")
@@ -149,6 +157,7 @@ class LocalTurn private constructor(private val context: Context) {
                     Diag.w("local: speech error $error")
                     if (offline.available()) {
                         offline.listen { texts ->
+                            if (!active) return@listen
                             heardAt = SystemClock.elapsedRealtime()
                             if (texts.isEmpty()) finish() else handle(texts)
                         }
@@ -215,6 +224,7 @@ class LocalTurn private constructor(private val context: Context) {
 
     /** Immediately stops any local listening or local TTS reply. */
     fun stop(releaseModel: Boolean = false) {
+        main.removeCallbacksAndMessages(LISTEN_TOKEN)
         FloatingOrb.dismiss(context)
         stopBargeInMonitor()
         if (active || _phase.value != LocalPhase.Idle) {
@@ -232,6 +242,7 @@ class LocalTurn private constructor(private val context: Context) {
     fun interrupt(resumeListening: Boolean = false) {
         if (_phase.value != LocalPhase.Speaking && !speaker.isAudible(tailMs = 0)) return
         Diag.i("local: interrupted while speaking (resumeListening=$resumeListening)")
+        main.removeCallbacksAndMessages(LISTEN_TOKEN)
         stopBargeInMonitor()
         speaker.flush()
         AudioPlaybackState.onLocalTtsEnded()
@@ -246,6 +257,7 @@ class LocalTurn private constructor(private val context: Context) {
     }
 
     private fun finish() {
+        main.removeCallbacksAndMessages(LISTEN_TOKEN)
         stopBargeInMonitor()
         active = false
         FloatingOrb.replyFinished(context)
@@ -354,6 +366,7 @@ class LocalTurn private constructor(private val context: Context) {
         private const val BARGE_IN_LEVEL = 1_650
         private const val VOICE_IDLE_MS = 5 * 60_000L // keeps the speech model and voice loaded
         private val SHUTDOWN = Any()
+        private val LISTEN_TOKEN = Any()
 
         @Volatile private var instance: LocalTurn? = null
 

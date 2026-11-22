@@ -208,43 +208,86 @@ private data class ShilexBrushes(
     val neutralRowIconBorderGradient: Brush,
 )
 
-private fun buildBrushes(
+private fun buildGlassBrushes(
+    colors: androidx.compose.material3.ColorScheme,
+    dark: Boolean,
+    accent: Color,
+    violet: Color,
+    bubbleEndViolet: Color,
+    errorColor: Color,
+): ShilexBrushes {
+    val rimTop = if (dark) Color(0x52FFFFFF) else Color(0xD8FFFFFF)
+    val rimBottom = if (dark) Color(0x28FFFFFF) else colors.outlineVariant.copy(alpha = 0.85f)
+    val cardTop = if (dark) Color(0xFF1E2028) else Color(0xF5FFFFFF)
+    val cardBottom = if (dark) Color(0xFF111218) else Color(0xFFEAF0F4)
+    val dockTop = if (dark) Color(0xEB1C1F27) else Color(0xF5FFFFFF)
+    val dockBottom = if (dark) Color(0xEB101218) else Color(0xFFE5EDF2)
+    return ShilexBrushes(
+        glassBorderGradient = Brush.verticalGradient(
+            listOf(rimTop, colors.outline.copy(alpha = if (dark) 0.28f else 0.45f), rimBottom),
+        ),
+        glassSurfaceGradient = Brush.verticalGradient(listOf(cardTop, cardBottom)),
+        glassDockSurfaceGradient = Brush.verticalGradient(listOf(dockTop, dockBottom)),
+        glassDockBorderGradient = Brush.verticalGradient(
+            listOf(rimTop, accent.copy(alpha = 0.48f), rimBottom),
+        ),
+        glassAccentGradient = Brush.horizontalGradient(listOf(accent, violet)),
+        userChatBubbleGradient = Brush.horizontalGradient(listOf(accent, bubbleEndViolet)),
+        liveStopButtonGradient = Brush.verticalGradient(listOf(errorColor, errorColor.copy(alpha = 0.80f))),
+        talkButtonGradient = Brush.verticalGradient(listOf(accent.copy(alpha = 0.90f), accent)),
+        buttonRimGradient = Brush.verticalGradient(
+            listOf(rimTop, colors.onSurface.copy(alpha = 0.08f)),
+        ),
+        neutralRowIconBgGradient = Brush.verticalGradient(listOf(colors.surfaceVariant, colors.surfaceContainer)),
+        neutralRowIconBorderGradient = Brush.verticalGradient(
+            listOf(rimTop.copy(alpha = 0.65f), colors.outline.copy(alpha = 0.42f)),
+        ),
+    )
+}
+
+private fun buildFlatBrushes(
     colors: androidx.compose.material3.ColorScheme,
     accent: Color,
     violet: Color,
     bubbleEndViolet: Color,
     errorColor: Color,
-): ShilexBrushes = ShilexBrushes(
-    glassBorderGradient = Brush.verticalGradient(
-        listOf(
-            colors.outlineVariant.copy(alpha = 0.95f),
-            colors.outline.copy(alpha = 0.34f),
-            colors.outlineVariant.copy(alpha = 0.62f),
-        ),
-    ),
-    glassSurfaceGradient = Brush.verticalGradient(listOf(colors.surfaceVariant, colors.surface)),
-    glassDockSurfaceGradient = Brush.verticalGradient(listOf(colors.surfaceContainer, colors.surface)),
-    glassDockBorderGradient = Brush.verticalGradient(
-        listOf(
-            colors.outlineVariant,
-            accent.copy(alpha = 0.50f),
-            colors.outline.copy(alpha = 0.62f),
-        ),
-    ),
-    glassAccentGradient = Brush.horizontalGradient(listOf(accent, violet)),
-    userChatBubbleGradient = Brush.horizontalGradient(listOf(accent, bubbleEndViolet)),
-    liveStopButtonGradient = Brush.verticalGradient(listOf(errorColor, errorColor.copy(alpha = 0.78f))),
-    talkButtonGradient = Brush.verticalGradient(listOf(accent.copy(alpha = 0.88f), accent)),
-    buttonRimGradient = Brush.verticalGradient(
-        listOf(colors.onSurface.copy(alpha = 0.24f), colors.onSurface.copy(alpha = 0.08f)),
-    ),
-    neutralRowIconBgGradient = Brush.verticalGradient(listOf(colors.surfaceVariant, colors.surface)),
-    neutralRowIconBorderGradient = Brush.verticalGradient(
-        listOf(colors.outlineVariant, colors.outline.copy(alpha = 0.5f)),
-    ),
+): ShilexBrushes {
+    val cardSolid = colors.surfaceContainer
+    val borderSolid = colors.outlineVariant
+    return ShilexBrushes(
+        glassBorderGradient = Brush.verticalGradient(listOf(borderSolid, borderSolid)),
+        glassSurfaceGradient = Brush.verticalGradient(listOf(cardSolid, cardSolid)),
+        glassDockSurfaceGradient = Brush.verticalGradient(listOf(colors.surfaceVariant, colors.surfaceContainer)),
+        glassDockBorderGradient = Brush.verticalGradient(listOf(borderSolid, borderSolid)),
+        glassAccentGradient = Brush.horizontalGradient(listOf(accent, violet)),
+        userChatBubbleGradient = Brush.horizontalGradient(listOf(accent, bubbleEndViolet)),
+        liveStopButtonGradient = Brush.verticalGradient(listOf(errorColor, errorColor)),
+        talkButtonGradient = Brush.verticalGradient(listOf(accent, accent)),
+        buttonRimGradient = Brush.verticalGradient(listOf(borderSolid, borderSolid)),
+        neutralRowIconBgGradient = Brush.verticalGradient(listOf(colors.surfaceVariant, colors.surfaceVariant)),
+        neutralRowIconBorderGradient = Brush.verticalGradient(listOf(borderSolid, borderSolid)),
+    )
+}
+
+private val DarkGlassBrushes = buildGlassBrushes(
+    colors = Dark,
+    dark = true,
+    accent = DarkCyan,
+    violet = DarkViolet,
+    bubbleEndViolet = Color(0xFF7C3AED),
+    errorColor = DarkError,
 )
 
-private val DarkShilexBrushes = buildBrushes(
+private val LightGlassBrushes = buildGlassBrushes(
+    colors = Light,
+    dark = false,
+    accent = LightCyan,
+    violet = LightViolet,
+    bubbleEndViolet = LightViolet,
+    errorColor = LightError,
+)
+
+private val DarkFlatBrushes = buildFlatBrushes(
     colors = Dark,
     accent = DarkCyan,
     violet = DarkViolet,
@@ -252,7 +295,7 @@ private val DarkShilexBrushes = buildBrushes(
     errorColor = DarkError,
 )
 
-private val LightShilexBrushes = buildBrushes(
+private val LightFlatBrushes = buildFlatBrushes(
     colors = Light,
     accent = LightCyan,
     violet = LightViolet,
@@ -261,9 +304,10 @@ private val LightShilexBrushes = buildBrushes(
 )
 
 private val LocalAppearanceMode = compositionLocalOf { AppearanceMode.Dark }
-private val LocalShilexBrushes = staticCompositionLocalOf { DarkShilexBrushes }
+val LocalLiquidGlassEnabled = compositionLocalOf { true }
+private val LocalShilexBrushes = staticCompositionLocalOf { DarkGlassBrushes }
 
-/** JARVIS Liquid Glass theme with persistent dark, light, and live system modes. */
+/** JARVIS theme with persistent Dark, Light, System modes and optional iOS Liquid Glass styling. */
 @Composable
 fun ShilexTheme(content: @Composable () -> Unit) {
     val context = LocalContext.current
@@ -271,9 +315,15 @@ fun ShilexTheme(content: @Composable () -> Unit) {
     var savedMode by remember(preferences) {
         mutableStateOf(Settings(context).appearanceMode)
     }
+    var liquidGlassEnabled by remember(preferences) {
+        mutableStateOf(Settings(context).liquidGlassEnabled)
+    }
     DisposableEffect(preferences) {
         val listener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
-            if (key == Settings.PREF_APPEARANCE_MODE) savedMode = Settings(context).appearanceMode
+            when (key) {
+                Settings.PREF_APPEARANCE_MODE -> savedMode = Settings(context).appearanceMode
+                Settings.PREF_LIQUID_GLASS -> liquidGlassEnabled = Settings(context).liquidGlassEnabled
+            }
         }
         preferences.registerOnSharedPreferenceChangeListener(listener)
         onDispose { preferences.unregisterOnSharedPreferenceChangeListener(listener) }
@@ -283,6 +333,12 @@ fun ShilexTheme(content: @Composable () -> Unit) {
         AppearanceMode.Dark -> true
         AppearanceMode.Light -> false
         AppearanceMode.System -> systemDark
+    }
+    val brushes = when {
+        dark && liquidGlassEnabled -> DarkGlassBrushes
+        dark -> DarkFlatBrushes
+        liquidGlassEnabled -> LightGlassBrushes
+        else -> LightFlatBrushes
     }
     val view = LocalView.current
     val window = (context as? Activity)?.window
@@ -296,7 +352,8 @@ fun ShilexTheme(content: @Composable () -> Unit) {
     }
     CompositionLocalProvider(
         LocalAppearanceMode provides savedMode,
-        LocalShilexBrushes provides if (dark) DarkShilexBrushes else LightShilexBrushes,
+        LocalLiquidGlassEnabled provides liquidGlassEnabled,
+        LocalShilexBrushes provides brushes,
     ) {
         MaterialTheme(
             colorScheme = if (dark) Dark else Light,
@@ -310,6 +367,10 @@ fun ShilexTheme(content: @Composable () -> Unit) {
 @Composable
 @ReadOnlyComposable
 fun currentAppearanceMode(): AppearanceMode = LocalAppearanceMode.current
+
+@Composable
+@ReadOnlyComposable
+fun currentLiquidGlassEnabled(): Boolean = LocalLiquidGlassEnabled.current
 
 // Common color accessors for screens
 val Accent: Color @Composable @ReadOnlyComposable get() = MaterialTheme.colorScheme.primary

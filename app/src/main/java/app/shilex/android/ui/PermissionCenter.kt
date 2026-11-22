@@ -243,7 +243,7 @@ private fun PermissionItemRow(
                             shape = RoundedCornerShape(50),
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = ElectricCyan,
-                                contentColor = Color(0xFF001E26),
+                                contentColor = MaterialTheme.colorScheme.onPrimary,
                             ),
                         ) {
                             Text(item.actionLabel, fontWeight = FontWeight.SemiBold)
@@ -281,7 +281,7 @@ private fun PermissionItemRow(
                 modifier = Modifier
                     .padding(start = 46.dp)
                     .clip(RoundedCornerShape(10.dp))
-                    .background(Color(0x12FFFFFF))
+                    .background(GlassSurfaceVariant)
                     .border(0.6.dp, GlassBorderSubtle, RoundedCornerShape(10.dp))
                     .padding(horizontal = 10.dp, vertical = 6.dp),
             )

@@ -65,21 +65,15 @@ fun VoiceSetupDialog(
         onDismissRequest = { if (!busy) onDismiss() },
         properties = DialogProperties(usePlatformDefaultWidth = false),
     ) {
-        val modalShape = RoundedCornerShape(28.dp)
+        val glassEnabled = currentLiquidGlassEnabled()
+        val modalShape = RoundedCornerShape(if (glassEnabled) 28.dp else 18.dp)
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 24.dp)
-                .shadow(24.dp, modalShape, ambientColor = Color.Black, spotColor = Color.Black)
+                .shadow(if (glassEnabled) 24.dp else 10.dp, modalShape, ambientColor = Color.Black.copy(alpha = 0.45f), spotColor = Color.Black.copy(alpha = 0.45f))
                 .clip(modalShape)
-                .background(
-                    Brush.verticalGradient(
-                        listOf(
-                            Color(0xEB1D1D23),
-                            Color(0xF0121216),
-                        ),
-                    ),
-                )
+                .background(GlassSurfaceGradient)
                 .border(1.dp, GlassBorderGradient, modalShape)
                 .padding(22.dp),
         ) {
@@ -123,7 +117,7 @@ fun VoiceSetupDialog(
                             onSave(samples.toList())
                             onDismiss()
                         },
-                        colors = ButtonDefaults.buttonColors(containerColor = ElectricCyan, contentColor = Color(0xFF001E26)),
+                        colors = ButtonDefaults.buttonColors(containerColor = ElectricCyan, contentColor = MaterialTheme.colorScheme.onPrimary),
                         shape = RoundedCornerShape(50),
                     ) { Text("Save", fontWeight = FontWeight.SemiBold) }
                 } else {
@@ -148,7 +142,7 @@ fun VoiceSetupDialog(
                                 }
                             }
                         },
-                        colors = ButtonDefaults.buttonColors(containerColor = ElectricCyan, contentColor = Color(0xFF001E26)),
+                        colors = ButtonDefaults.buttonColors(containerColor = ElectricCyan, contentColor = MaterialTheme.colorScheme.onPrimary),
                         shape = RoundedCornerShape(50),
                     ) { Text(if (busy) "Listening…" else "Record", fontWeight = FontWeight.SemiBold) }
                 }

@@ -77,11 +77,15 @@ fun GlassCard(
     verticalPadding: Int = 6,
     content: @Composable ColumnScope.() -> Unit,
 ) {
+    val glassEnabled = currentLiquidGlassEnabled()
+    val cornerShape = remember(shape, glassEnabled) {
+        if (glassEnabled) shape else RoundedCornerShape(16.dp)
+    }
     Column(
         modifier = modifier
-            .clip(shape)
+            .clip(cornerShape)
             .background(GlassSurfaceGradient)
-            .border(1.dp, GlassBorderGradient, shape)
+            .border(1.dp, GlassBorderGradient, cornerShape)
             .padding(horizontal = horizontalPadding.dp, vertical = verticalPadding.dp),
         content = content,
     )
@@ -109,16 +113,28 @@ fun GlassRowIcon(
     val iconShape = remember { RoundedCornerShape(10.dp) }
     val neutralBackground = NeutralRowIconBgGradient
     val neutralBorder = NeutralRowIconBorderGradient
-    val bgBrush = remember(tint, accentGlow, neutralBackground) {
+    val glassEnabled = currentLiquidGlassEnabled()
+    val subtleEdge = GlassBorderSubtle
+    val bgBrush = remember(tint, accentGlow, neutralBackground, glassEnabled) {
         if (accentGlow) {
-            Brush.verticalGradient(listOf(tint.copy(alpha = 0.24f), tint.copy(alpha = 0.10f)))
+            Brush.verticalGradient(
+                listOf(
+                    tint.copy(alpha = if (glassEnabled) 0.24f else 0.16f),
+                    tint.copy(alpha = if (glassEnabled) 0.10f else 0.16f),
+                ),
+            )
         } else {
             neutralBackground
         }
     }
-    val borderBrush = remember(tint, accentGlow, neutralBorder) {
+    val borderBrush = remember(tint, accentGlow, neutralBorder, subtleEdge, glassEnabled) {
         if (accentGlow) {
-            Brush.verticalGradient(listOf(tint.copy(alpha = 0.45f), Color(0x14FFFFFF)))
+            Brush.verticalGradient(
+                listOf(
+                    tint.copy(alpha = 0.45f),
+                    if (glassEnabled) subtleEdge else tint.copy(alpha = 0.45f),
+                ),
+            )
         } else {
             neutralBorder
         }
@@ -263,17 +279,17 @@ fun IosGlassSwitch(
     ) {
         Box(
             modifier = Modifier
-                .fillMaxSize()
                 .graphicsLayer { alpha = trackAlpha }
+                .fillMaxSize()
                 .background(GlassAccentGradient),
         )
         Box(
             modifier = Modifier
                 .graphicsLayer { translationX = baseStartPx + thumbProgress * travelPx }
                 .size(26.dp)
-                .shadow(elevation = if (checked) 5.dp else 3.dp, shape = CircleShape, spotColor = if (checked) ElectricCyan else Color.Black)
+                .shadow(elevation = if (checked) 5.dp else 2.dp, shape = CircleShape, spotColor = if (checked) ElectricCyan else Color.Black)
                 .background(Color.White, CircleShape)
-                .border(0.5.dp, Color(0x33000000), CircleShape),
+                .border(0.6.dp, GlassBorderSubtle, CircleShape),
         )
     }
 }
@@ -316,21 +332,24 @@ fun Pill(
     modifier: Modifier = Modifier,
     dot: Boolean = true,
 ) {
+    val glassEnabled = currentLiquidGlassEnabled()
     val pillShape = remember { RoundedCornerShape(50) }
-    val bgBrush = remember(color) {
+    val bgBrush = remember(color, glassEnabled) {
         Brush.horizontalGradient(
-            listOf(
-                color.copy(alpha = 0.16f),
-                color.copy(alpha = 0.08f),
-            ),
+            if (glassEnabled) {
+                listOf(color.copy(alpha = 0.16f), color.copy(alpha = 0.08f))
+            } else {
+                listOf(color.copy(alpha = 0.14f), color.copy(alpha = 0.14f))
+            },
         )
     }
-    val borderBrush = remember(color) {
+    val borderBrush = remember(color, glassEnabled) {
         Brush.horizontalGradient(
-            listOf(
-                color.copy(alpha = 0.45f),
-                color.copy(alpha = 0.16f),
-            ),
+            if (glassEnabled) {
+                listOf(color.copy(alpha = 0.45f), color.copy(alpha = 0.16f))
+            } else {
+                listOf(color.copy(alpha = 0.35f), color.copy(alpha = 0.35f))
+            },
         )
     }
     Row(

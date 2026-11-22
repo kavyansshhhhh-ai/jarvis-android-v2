@@ -58,7 +58,8 @@ fun ControlCard(modifier: Modifier = Modifier, showWhenOn: Boolean = false) {
         return
     }
 
-    val shape = RoundedCornerShape(24.dp)
+    val glassEnabled = currentLiquidGlassEnabled()
+    val shape = RoundedCornerShape(if (glassEnabled) 24.dp else 16.dp)
 
     Column(
         modifier
@@ -67,13 +68,17 @@ fun ControlCard(modifier: Modifier = Modifier, showWhenOn: Boolean = false) {
             .background(GlassSurfaceGradient)
             .border(
                 1.dp,
-                Brush.verticalGradient(
-                    listOf(
-                        Color(0x47FFFFFF),
-                        Color(0x2838E5FF),
-                        Color(0x18FFFFFF),
-                    ),
-                ),
+                if (glassEnabled) {
+                    Brush.verticalGradient(
+                        listOf(
+                            GlassBorderColor,
+                            ElectricCyan.copy(alpha = 0.25f),
+                            GlassBorderSubtle,
+                        ),
+                    )
+                } else {
+                    GlassBorderGradient
+                },
                 shape,
             )
             .padding(16.dp),
@@ -94,7 +99,7 @@ fun ControlCard(modifier: Modifier = Modifier, showWhenOn: Boolean = false) {
                 },
                 colors = ButtonDefaults.buttonColors(
                     containerColor = ElectricCyan,
-                    contentColor = Color(0xFF001E26),
+                    contentColor = MaterialTheme.colorScheme.onPrimary,
                 ),
                 shape = RoundedCornerShape(50),
             ) { Text("Turn on", fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold) }

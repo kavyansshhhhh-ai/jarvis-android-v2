@@ -33,7 +33,8 @@ import app.shilex.android.task.TaskState
 @Composable
 fun TaskCard(task: Task, modifier: Modifier = Modifier) {
     val (label, color) = stateLabel(task.state)
-    val shape = RoundedCornerShape(24.dp)
+    val glassEnabled = currentLiquidGlassEnabled()
+    val shape = RoundedCornerShape(if (glassEnabled) 24.dp else 16.dp)
 
     Column(
         modifier
@@ -42,13 +43,17 @@ fun TaskCard(task: Task, modifier: Modifier = Modifier) {
             .background(GlassSurfaceGradient)
             .border(
                 1.dp,
-                Brush.verticalGradient(
-                    listOf(
-                        Color(0x47FFFFFF),
-                        color.copy(alpha = 0.35f),
-                        Color(0x18FFFFFF),
-                    ),
-                ),
+                if (glassEnabled) {
+                    Brush.verticalGradient(
+                        listOf(
+                            GlassBorderColor,
+                            color.copy(alpha = 0.35f),
+                            GlassBorderSubtle,
+                        ),
+                    )
+                } else {
+                    GlassBorderGradient
+                },
                 shape,
             )
             .padding(16.dp)
@@ -93,7 +98,7 @@ fun TaskCard(task: Task, modifier: Modifier = Modifier) {
                 Modifier
                     .fillMaxWidth()
                     .padding(top = 4.dp)
-                    .background(Color(0x1AFFFFFF), RoundedCornerShape(10.dp))
+                    .background(GlassSurfaceVariant, RoundedCornerShape(10.dp))
                     .padding(horizontal = 10.dp, vertical = 6.dp),
             ) {
                 Text(task.detail, style = MaterialTheme.typography.bodySmall, color = Muted)

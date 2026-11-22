@@ -255,4 +255,51 @@ class PlayStoreMatcherTest {
         assertEquals(PlayStoreMatcher.PlayStoreScreenState.AppDetails, PlayStoreMatcher.detectScreenState(detail))
         assertEquals(PlayStoreMatcher.ButtonState.Install, PlayStoreMatcher.analyzeScreen("Free Fire India", detail).buttonState)
     }
+
+    @Test
+    fun prefersOrganicExactListingWhenUnrelatedSponsoredAdExists() {
+        val elements = listOf(
+            ScreenElement(1, "text", "Sponsored", ""),
+            ScreenElement(2, "text", "Other Social App", ""),
+            ScreenElement(3, "text", "Some Studio", ""),
+            ScreenElement(4, "button", "Install", ""),
+            ScreenElement(5, "text", "Instagram", ""),
+            ScreenElement(6, "text", "Social · 4.4 ★", ""),
+            ScreenElement(7, "button", "Install", ""),
+        )
+        val decision = PlayStoreMatcher.analyzeScreen("Instagram", elements)
+        assertEquals(false, decision.requiresUserChoice)
+        assertNotNull(decision.matchedListingElement)
+        assertEquals(5, decision.matchedListingElement?.number)
+    }
+
+    @Test
+    fun detectsIncompatibleUnavailableAndNetworkStoreErrors() {
+        val incompatible = listOf(
+            ScreenElement(1, "text", "Your device isn't compatible with this version", ""),
+        )
+        assertEquals(
+            PlayStoreMatcher.PlayStoreScreenState.StoreError,
+            PlayStoreMatcher.detectScreenState(incompatible),
+        )
+        assertTrue(PlayStoreMatcher.detectStoreError(incompatible).orEmpty().contains("compatible"))
+
+        val unavailable = listOf(
+            ScreenElement(1, "text", "Item not found", ""),
+        )
+        assertEquals(
+            PlayStoreMatcher.PlayStoreScreenState.StoreError,
+            PlayStoreMatcher.detectScreenState(unavailable),
+        )
+        assertTrue(PlayStoreMatcher.detectStoreError(unavailable).orEmpty().contains("available"))
+
+        val offline = listOf(
+            ScreenElement(1, "text", "You're offline. Check your internet connection", ""),
+        )
+        assertEquals(
+            PlayStoreMatcher.PlayStoreScreenState.StoreError,
+            PlayStoreMatcher.detectScreenState(offline),
+        )
+        assertTrue(PlayStoreMatcher.detectStoreError(offline).orEmpty().contains("network"))
+    }
 }

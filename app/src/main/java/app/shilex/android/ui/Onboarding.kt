@@ -274,7 +274,7 @@ private fun PermissionsOnboardingStep(onContinue: () -> Unit) {
                     shape = RoundedCornerShape(50),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = ElectricCyan,
-                        contentColor = Color(0xFF001E26),
+                        contentColor = MaterialTheme.colorScheme.onPrimary,
                     ),
                     modifier = Modifier.fillMaxWidth(),
                 ) {
@@ -385,7 +385,8 @@ private fun Page(title: String, detail: String, content: @Composable ColumnScope
 
 @Composable
 private fun Primary(label: String, onClick: () -> Unit) {
-    val shape = RoundedCornerShape(50)
+    val glassEnabled = currentLiquidGlassEnabled()
+    val shape = remember(glassEnabled) { RoundedCornerShape(if (glassEnabled) 50 else 18) }
     val interaction = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
     Button(
         onClick = onClick,
@@ -393,26 +394,21 @@ private fun Primary(label: String, onClick: () -> Unit) {
         shape = shape,
         colors = ButtonDefaults.buttonColors(
             containerColor = ElectricCyan,
-            contentColor = Color(0xFF001E26),
+            contentColor = MaterialTheme.colorScheme.onPrimary,
         ),
         modifier = Modifier
             .fillMaxWidth()
             .height(54.dp)
             .glassPressScale(interaction)
             .shadow(
-                elevation = 8.dp,
+                elevation = if (glassEnabled) 8.dp else 4.dp,
                 shape = shape,
                 ambientColor = ElectricCyan,
                 spotColor = ElectricCyan,
             )
             .border(
                 1.dp,
-                Brush.verticalGradient(
-                    listOf(
-                        Color(0x99FFFFFF),
-                        Color(0x33FFFFFF),
-                    ),
-                ),
+                GlassBorderGradient,
                 shape,
             ),
     ) {
@@ -422,6 +418,7 @@ private fun Primary(label: String, onClick: () -> Unit) {
 
 @Composable
 private fun Progress(index: Int, modifier: Modifier) {
+    val inactiveBrush = Brush.horizontalGradient(listOf(GlassBorderSubtle, GlassBorderSubtle))
     Row(modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         Step.entries.forEach {
             val active = it.ordinal <= index
@@ -434,7 +431,7 @@ private fun Progress(index: Int, modifier: Modifier) {
                         if (active) {
                             Brush.horizontalGradient(listOf(ElectricCyan, NeonViolet))
                         } else {
-                            Brush.horizontalGradient(listOf(Color(0x1FFFFFFF), Color(0x1FFFFFFF)))
+                            inactiveBrush
                         },
                     ),
             )

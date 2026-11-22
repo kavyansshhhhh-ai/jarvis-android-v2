@@ -73,7 +73,19 @@ object PlayStoreMatcher {
         """\b(results for|similar apps|you might also like|sponsored|top charts|filters|see more results|search results)\b|खोज परिणाम|खोज के नतीजे|समान ऐप्लिकेशन""",
         RegexOption.IGNORE_CASE,
     )
-    private val SPONSORED_CUE = Regex("""\b(sponsored|advertisement|ad)\b""", RegexOption.IGNORE_CASE)
+    private val SPONSORED_CUE = Regex("""\b(sponsored|advertisement|promoted)\b|^ad(?:\s*[·•])?$""", RegexOption.IGNORE_CASE)
+    private val INCOMPATIBLE_ERROR_RE = Regex(
+        """\b(isn't compatible|not compatible|incompatible with your device|your device isn't compatible)\b""",
+        RegexOption.IGNORE_CASE,
+    )
+    private val UNAVAILABLE_ERROR_RE = Regex(
+        """\b(item not found|not available in your country|isn't available|couldn't find|no results found|no results for)\b""",
+        RegexOption.IGNORE_CASE,
+    )
+    private val NETWORK_ERROR_RE = Regex(
+        """\b(check your internet|you're offline|no internet connection|try again)\b""",
+        RegexOption.IGNORE_CASE,
+    )
 
     enum class PlayStoreScreenState {
         HomeScreen,
@@ -82,11 +94,31 @@ object PlayStoreMatcher {
         AppDetails,
         InstallingOrProgress,
         AuthOrRestrictedDialog,
+        StoreError,
         Unknown,
+    }
+
+    fun detectStoreError(elements: List<ScreenElement>): String? {
+        val text = elements.joinToString(" ") { "${it.label} ${it.value}".trim() }
+        return when {
+            INCOMPATIBLE_ERROR_RE.containsMatchIn(text) ->
+                "Google Play Store reports that this app isn't compatible with this device."
+            UNAVAILABLE_ERROR_RE.containsMatchIn(text) ->
+                "Google Play Store reports that this app isn't available or couldn't be found."
+            NETWORK_ERROR_RE.containsMatchIn(text) ->
+                "Google Play Store hit a network connection issue. Check internet connectivity and try again."
+            else -> null
+        }
     }
 
     fun detectScreenState(elements: List<ScreenElement>): PlayStoreScreenState {
         if (isPaidOrRestricted(elements) != null) return PlayStoreScreenState.AuthOrRestrictedDialog
+        if (detectStoreError(elements) != null && !elements.any { el ->
+                el.role == "button" && (INSTALL_BTN_RE.containsMatchIn(el.label.trim()) || OPEN_BTN_RE.containsMatchIn(el.label.trim()))
+            }
+        ) {
+            return PlayStoreScreenState.StoreError
+        }
         val allLabels = elements.joinToString(" ") { "${it.label} ${it.hint}" }
         val hasDetailsCue = DETAILS_CUES.containsMatchIn(allLabels)
         val hasSearchResultsCue = RESULTS_CUES.containsMatchIn(allLabels)
@@ -189,10 +221,21 @@ object PlayStoreMatcher {
             INSTALLED_BADGE_RE.containsMatchIn(el.label.trim())
         }
 
+        val storeError = detectStoreError(elements)
+        if (storeError != null && installBtn == null && openBtn == null && updateBtn == null) {
+            return ScreenDecision(ButtonState.PaidOrBlocked, reason = storeError)
+        }
+
         val scoredListings = rankMatchingListings(wantedCompact, wantedTokens, elements)
-        val listingMatch = scoredListings.firstOrNull()?.first
         val screenState = detectScreenState(elements)
-        if (listingMatch != null && elements.any { SPONSORED_CUE.containsMatchIn("${it.label} ${it.hint}") }) {
+        val organicPreferred = scoredListings.firstOrNull { (candidate, _) ->
+            !isNearSponsoredCue(elements, candidate)
+        }?.first
+        val listingMatch = organicPreferred ?: scoredListings.firstOrNull()?.first
+        if (listingMatch != null &&
+            screenState != PlayStoreScreenState.AppDetails &&
+            isNearSponsoredCue(elements, listingMatch)
+        ) {
             return ScreenDecision(
                 buttonState = ButtonState.None,
                 matchedListingElement = listingMatch,
@@ -337,6 +380,17 @@ object PlayStoreMatcher {
             if (score > 0) el to score else null
         }.sortedByDescending { it.second }
     }
+
+    private fun isNearSponsoredCue(elements: List<ScreenElement>, candidate: ScreenElement): Boolean {
+        val idx = elements.indexOfFirst { it.number == candidate.number }
+        if (idx < 0) return false
+        val from = (idx - 2).coerceAtLeast(0)
+        val to = (idx + 1).coerceAtMost(elements.lastIndex)
+        return (from..to).any { i ->
+            val el = elements[i]
+            SPONSORED_CUE.containsMatchIn("${el.label} ${el.hint}")
+        }
+    }
 }
 
 /**
@@ -411,7 +465,9 @@ object PlayStoreTools {
             val marketIntent = Intent(
                 Intent.ACTION_VIEW,
                 Uri.parse("market://search?q=${Uri.encode(appName)}&c=apps"),
-            ).setPackage(ControlRules.PLAY_STORE_PACKAGE)
+            )
+                .setPackage(ControlRules.PLAY_STORE_PACKAGE)
+                .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
             val searchSubmittedOnLaunch = marketIntent.resolveActivity(pm) != null
             val launchIntent: Intent = if (searchSubmittedOnLaunch) {
                 marketIntent
@@ -464,7 +520,8 @@ object PlayStoreTools {
             val checker = InstalledAppChecker(host.context)
             var tappedInstall = false
             var confirmedInstall = false
-            var typedSearch = searchSubmittedOnLaunch
+            var typedSearch = false
+            var deepLinkSettling = searchSubmittedOnLaunch
             var consecutiveSearches = 0
             var actionAttempted = false
             var unchangedScreenCount = 0
@@ -493,6 +550,12 @@ object PlayStoreTools {
 
                 val currentScreenState = PlayStoreMatcher.detectScreenState(snap.elements)
                 val resultsAlreadyVisible = PlayStoreMatcher.isResultsVisible(snap.elements, appName)
+                if (resultsAlreadyVisible || currentScreenState != PlayStoreMatcher.PlayStoreScreenState.HomeScreen) {
+                    deepLinkSettling = false
+                } else if (poll >= 2) {
+                    // market:// URI did not switch off HomeScreen cleanly; allow one safe in-app search fallback.
+                    deepLinkSettling = false
+                }
                 val decision = PlayStoreMatcher.analyzeScreen(appName, snap.elements)
                 val searchEl = PlayStoreMatcher.findSearchInput(snap.elements)
 
@@ -599,7 +662,7 @@ object PlayStoreTools {
                                     Diag.i("playstore: state=$flowState opened listing ${listingEl.label}")
                                 }
                             }
-                        } else if (PlayStoreMatcher.canSubmitSearch(
+                        } else if (!deepLinkSettling && PlayStoreMatcher.canSubmitSearch(
                                 searchSubmitted = typedSearch,
                                 resultsVisible = resultsAlreadyVisible,
                                 screenState = currentScreenState,
@@ -612,20 +675,36 @@ object PlayStoreTools {
                                 actionAttempted = true
                                 consecutiveSearches++
                                 flowState = StoreFlowState.SEARCHING
-                                if (searchNode.isEditable) {
-                                    if (service.type(searchNode, appName, submitIme = true)) {
-                                        typedSearch = true
-                                        flowState = StoreFlowState.WAITING_FOR_RESULTS
-                                        Diag.i("playstore: state=$flowState typed query $appName")
-                                    }
+                                val typedOk = if (searchNode.isEditable) {
+                                    service.type(searchNode, appName, submitIme = true)
                                 } else if (service.click(searchNode)) {
                                     delay(500)
-                                    service.focusedField()?.let { field ->
-                                        if (service.type(field, appName, submitIme = true)) {
-                                            typedSearch = true
-                                            flowState = StoreFlowState.WAITING_FOR_RESULTS
-                                            Diag.i("playstore: state=$flowState opened search & typed $appName")
+                                    val field = service.focusedField()
+                                        ?: service.snapshot(allowPlayStore = true)?.elements
+                                            ?.firstOrNull { it.role == "field" && it.isEnabled }
+                                            ?.number
+                                            ?.let(service::node)
+                                    field?.let { service.type(it, appName, submitIme = true) } ?: false
+                                } else {
+                                    false
+                                }
+                                typedSearch = true
+                                if (typedOk) {
+                                    flowState = StoreFlowState.WAITING_FOR_RESULTS
+                                    Diag.i("playstore: state=$flowState submitted query $appName")
+                                    // Fallback if Play Store's Compose search field kept autocomplete open instead of navigating on IME Enter
+                                    delay(550)
+                                    val afterType = service.snapshot(allowPlayStore = true)
+                                    if (afterType != null && !PlayStoreMatcher.isResultsVisible(afterType.elements, appName)) {
+                                        val wantedComp = PlayStoreMatcher.normalize(appName)
+                                        val suggestion = afterType.elements.firstOrNull { el ->
+                                            el.role != "field" &&
+                                                el.isEnabled &&
+                                                PlayStoreMatcher.normalize(el.label).let { c ->
+                                                    c == wantedComp || c.startsWith(wantedComp)
+                                                }
                                         }
+                                        suggestion?.number?.let(service::node)?.let { service.click(it) }
                                     }
                                 }
                             }
@@ -638,7 +717,7 @@ object PlayStoreTools {
             val newlyAdded = findVerifiedInstalledApp(host, checker, appName, knownPackagesBefore, explicitPackage)
             if (newlyAdded != null) {
                 flowState = StoreFlowState.COMPLETED
-                return "Verified: ${newlyAdded.label} (${newlyAdded.packageName}) is now installed."
+                return "Verified: ${newlyAdded.label} (${newlyAdded.packageName}) is now installed. Ask if the user wants to open it."
             }
             return if (tappedInstall) {
                 "Tapped Install for \"$appName\" in Google Play Store; installation is still in progress and not yet verified by Android."
@@ -670,6 +749,6 @@ object PlayStoreTools {
 
         private const val WAIT_MS = 8_000L
         private const val STEP_DELAY_MS = 900L
-        private const val POLL_STEPS = 12
+        private const val POLL_STEPS = 16
     }
 }

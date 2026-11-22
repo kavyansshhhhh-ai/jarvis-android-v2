@@ -62,18 +62,15 @@ fun InstalledAppsDialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false),
     ) {
-        val shape = RoundedCornerShape(28.dp)
+        val glassEnabled = currentLiquidGlassEnabled()
+        val shape = remember(glassEnabled) { RoundedCornerShape(if (glassEnabled) 28.dp else 18.dp) }
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .fillMaxHeight(0.84f)
                 .padding(horizontal = 18.dp, vertical = 20.dp)
                 .clip(shape)
-                .background(
-                    Brush.verticalGradient(
-                        listOf(Color(0xF511131A), Color(0xEC090B10)),
-                    ),
-                )
+                .background(GlassSurfaceGradient)
                 .border(1.dp, GlassBorderGradient, shape)
                 .padding(20.dp),
         ) {
@@ -115,10 +112,10 @@ fun InstalledAppsDialog(
                     focusedTextColor = PureWhite,
                     unfocusedTextColor = PureWhite,
                     focusedBorderColor = ElectricCyan,
-                    unfocusedBorderColor = Color(0x33FFFFFF),
+                    unfocusedBorderColor = GlassBorderSubtle,
                     cursorColor = ElectricCyan,
-                    focusedContainerColor = Color(0x14FFFFFF),
-                    unfocusedContainerColor = Color(0x0CFFFFFF),
+                    focusedContainerColor = GlassSurfaceHighlight,
+                    unfocusedContainerColor = GlassSurfaceVariant,
                 ),
                 modifier = Modifier
                     .fillMaxWidth()

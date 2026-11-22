@@ -55,4 +55,45 @@ class WhatsAppWorkflowTest {
         assertEquals(3, WhatsAppCallMatcher.findCallButtonNumber(headerElements, meta, WhatsAppCallMatcher.CallKind.Audio))
         assertEquals(4, WhatsAppCallMatcher.findCallButtonNumber(headerElements, meta, WhatsAppCallMatcher.CallKind.Video))
     }
+
+    @Test
+    fun findsMessageBubbleDeleteIconAndDistinguishesDeleteScopes() {
+        val chatMessages = listOf(
+            ScreenElement(1, "text", "Rahul Sharma", ""),
+            ScreenElement(2, "text", "Hello, reaching in 10 mins", ""),
+            ScreenElement(3, "text", "Okay see you", ""),
+            ScreenElement(4, "field", "Message", ""),
+        )
+        assertEquals(2, WhatsAppDeleteMatcher.findMessageBubbleNumber(chatMessages, "reaching in 10"))
+        assertEquals(3, WhatsAppDeleteMatcher.findMessageBubbleNumber(chatMessages, ""))
+
+        val selectionBar = listOf(
+            ScreenElement(1, "text", "1 selected", ""),
+            ScreenElement(2, "button", "Delete", ""),
+        )
+        val selectionMeta = mapOf(
+            2 to ControlService.NodeMeta(2, "menuitem_conversations_delete", "Delete", "button", "com.whatsapp", Rect(200, 0, 260, 50)),
+        )
+        assertEquals(2, WhatsAppDeleteMatcher.findDeleteButtonNumber(selectionBar, selectionMeta))
+
+        val bothOptionsDialog = listOf(
+            ScreenElement(1, "text", "Delete message?", ""),
+            ScreenElement(2, "button", "Delete for everyone", ""),
+            ScreenElement(3, "button", "Delete for me", ""),
+            ScreenElement(4, "button", "Cancel", ""),
+        )
+        val both = WhatsAppDeleteMatcher.inspectDeleteDialog(bothOptionsDialog, emptyMap())
+        assertEquals(2, both.forEveryoneElementNumber)
+        assertEquals(3, both.forMeElementNumber)
+        assertEquals(4, both.cancelElementNumber)
+
+        val onlyMeDialog = listOf(
+            ScreenElement(1, "text", "Delete message from Rahul?", ""),
+            ScreenElement(2, "button", "Delete for me", ""),
+            ScreenElement(3, "button", "Cancel", ""),
+        )
+        val onlyMe = WhatsAppDeleteMatcher.inspectDeleteDialog(onlyMeDialog, emptyMap())
+        assertNull(onlyMe.forEveryoneElementNumber)
+        assertEquals(2, onlyMe.forMeElementNumber)
+    }
 }

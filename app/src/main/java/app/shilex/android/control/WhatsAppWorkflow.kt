@@ -73,7 +73,7 @@ object WhatsAppChatVerifier {
                 "contact_name" in viewId ||
                 "toolbar" in viewId ||
                 "action_bar_title" in viewId
-            val isEarlyTopRow = el.number <= 8 && el.role in setOf("text", "button")
+            val isEarlyTopRow = el.number <= 5 && el.role in setOf("text", "button")
             isExplicitHeaderId || isEarlyTopRow
         }.map { it.label.trim() }
         return topTitle.distinct()
@@ -448,23 +448,28 @@ object WhatsAppWorkflow {
             return "WhatsApp shows an authentication screen. Please unlock WhatsApp first."
         }
 
-        val bubbleNum = WhatsAppDeleteMatcher.findMessageBubbleNumber(snap.elements, targetSnippet)
-            ?: return "Could not find message matching $promptTarget in the open chat."
+        val preDeleteIconNum = WhatsAppDeleteMatcher.findDeleteButtonNumber(snap.elements, snap.meta)
+        val deleteIconNum = if (preDeleteIconNum != null && targetSnippet.isBlank()) {
+            // User already selected the message in WhatsApp before speaking ("delete the message I selected")
+            service.overlay.showActive()
+            preDeleteIconNum
+        } else {
+            val bubbleNum = WhatsAppDeleteMatcher.findMessageBubbleNumber(snap.elements, targetSnippet)
+                ?: return "Could not find message matching $promptTarget in the open chat."
 
-        val bubbleNode = service.node(bubbleNum)
-            ?: return "Could not locate message element on screen."
+            val bubbleNode = service.node(bubbleNum)
+                ?: return "Could not locate message element on screen."
 
-        service.overlay.showActive()
-        val longClicked = service.longClick(bubbleNode)
-        if (!longClicked) {
-            return "Failed to select the message in WhatsApp."
-        }
-        delay(600)
+            service.overlay.showActive()
+            val longClicked = service.longClick(bubbleNode)
+            if (!longClicked) {
+                return "Failed to select the message in WhatsApp."
+            }
+            delay(600)
 
-        val actionSnap = service.snapshot() ?: return "Couldn't read screen after selecting message."
-        val deleteIconNum = WhatsAppDeleteMatcher.findDeleteButtonNumber(actionSnap.elements, actionSnap.meta)
-        if (deleteIconNum == null) {
-            return "Delete icon did not appear after selecting the message."
+            val actionSnap = service.snapshot() ?: return "Couldn't read screen after selecting message."
+            WhatsAppDeleteMatcher.findDeleteButtonNumber(actionSnap.elements, actionSnap.meta)
+                ?: return "Delete icon did not appear after selecting the message."
         }
         val deleteIconNode = service.node(deleteIconNum) ?: return "Could not access Delete button."
         if (!service.click(deleteIconNode)) {
@@ -481,7 +486,7 @@ object WhatsAppWorkflow {
                     if (options.forMeElementNumber != null) {
                         options.cancelElementNumber?.let { cNum -> service.node(cNum)?.let { service.click(it) } }
                         TaskTracker.verified(false, "'Delete for everyone' not available.")
-                        return "WhatsApp only offers 'Delete for me' for this message (WhatsApp's time limit for deleting for everyone may have passed or this message was sent by someone else). Deletion was cancelled."
+                        return "WhatsApp only allows 'Delete for me' on this message (WhatsApp's time limit for 'Delete for everyone' may have passed, or this message was sent by someone else). Deletion was stopped so you can choose 'Delete for me' if you still want to remove it locally."
                     }
                     return "Neither 'Delete for everyone' nor 'Delete for me' was found in the dialog."
                 }

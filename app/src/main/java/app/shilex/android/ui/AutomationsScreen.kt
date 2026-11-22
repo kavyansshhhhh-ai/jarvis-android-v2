@@ -29,7 +29,11 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import app.shilex.android.memory.MemoryRules
 import app.shilex.android.memory.MemoryStore
+import app.shilex.android.memory.Routine
 import app.shilex.android.wake.WakeWordModel
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 private class Command(val title: String, val examples: String)
 
@@ -115,10 +119,17 @@ fun AutomationsScreen() {
 private fun Routines() {
     val context = LocalContext.current
     val store = remember { MemoryStore(context) }
-    var routines by remember { mutableStateOf(store.routines()) }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    var routines by remember { mutableStateOf<List<Routine>>(emptyList()) }
+    androidx.compose.runtime.LaunchedEffect(store) {
+        routines = withContext(Dispatchers.IO) { store.routines() }
+    }
     LifecycleResumeEffect(Unit) {
-        routines = store.routines()
-        onPauseOrDispose { }
+        val job = scope.launch(Dispatchers.IO) {
+            val loaded = store.routines()
+            withContext(Dispatchers.Main) { routines = loaded }
+        }
+        onPauseOrDispose { job.cancel() }
     }
 
     GlassCard(modifier = Modifier.fillMaxWidth()) {

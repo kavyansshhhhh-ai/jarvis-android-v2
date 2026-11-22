@@ -132,6 +132,7 @@ class VoiceSession private constructor(private val app: Application) : LiveClien
     private var replyWaitJob: Job? = null
     private var endAfterReplyJob: Job? = null
     private var connectJob: Job? = null
+    private var retryJob: Job? = null
 
     // Timings for the diagnostic log (never the words themselves).
     private var connectAt = 0L
@@ -256,6 +257,8 @@ class VoiceSession private constructor(private val app: Application) : LiveClien
         watchdog = null
         connectJob?.cancel()
         connectJob = null
+        retryJob?.cancel()
+        retryJob = null
         replyWaitJob?.cancel()
         replyWaitJob = null
         endAfterReplyJob?.cancel()
@@ -417,6 +420,8 @@ class VoiceSession private constructor(private val app: Application) : LiveClien
         connectAt = SystemClock.elapsedRealtime()
         val retryNum = synchronized(turnLock) { retries + 1 }
         Diag.i("socket: connecting (try $retryNum, resume=${resumeHandle != null}, model=${settings.model})")
+        retryJob?.cancel()
+        retryJob = null
         connectJob?.cancel()
         connectJob = scope.launch(Dispatchers.IO) {
             val profileSummary = PersonalProfileResolver.assistantContextSummary(PersonalProfileStore(app).load())
@@ -654,7 +659,8 @@ class VoiceSession private constructor(private val app: Application) : LiveClien
         }
         if (nextRetry > 0) {
             Diag.w("socket: lost, retry $nextRetry of $MAX_RETRIES")
-            scope.launch {
+            retryJob?.cancel()
+            retryJob = scope.launch {
                 delay(1_000L * nextRetry)
                 if (wanted) connect()
             }

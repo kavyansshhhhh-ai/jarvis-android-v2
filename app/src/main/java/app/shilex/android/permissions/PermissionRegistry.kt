@@ -255,8 +255,8 @@ object PermissionRegistry {
             id = PermissionId.GalleryMedia,
             title = "Gallery Photos",
             category = PermissionCategory.Runtime,
-            reason = "Finds a targeted photo in your gallery so JARVIS can ask confirmation before Android's delete dialog.",
-            dependentFeature = "Gallery photo lookup & confirmed deletion",
+            reason = "Lets JARVIS browse, open, search metadata, analyze photos when asked, and trigger confirmed deletion.",
+            dependentFeature = "Gallery visual assistance & confirmed deletion",
             manifestPermission = if (sdkInt >= Build.VERSION_CODES.TIRAMISU) {
                 Manifest.permission.READ_MEDIA_IMAGES
             } else {
@@ -448,12 +448,17 @@ object PermissionRegistry {
         PermissionId.PhoneCalls ->
             ContextCompat.checkSelfPermission(context, Manifest.permission.CALL_PHONE) == PackageManager.PERMISSION_GRANTED
         PermissionId.GalleryMedia -> {
-            val mediaPerm = if (sdkInt >= Build.VERSION_CODES.TIRAMISU) {
-                Manifest.permission.READ_MEDIA_IMAGES
+            if (sdkInt >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                ContextCompat.checkSelfPermission(context, Manifest.permission.READ_MEDIA_IMAGES) == PackageManager.PERMISSION_GRANTED ||
+                    ContextCompat.checkSelfPermission(context, Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED) == PackageManager.PERMISSION_GRANTED
             } else {
-                Manifest.permission.READ_EXTERNAL_STORAGE
+                val mediaPerm = if (sdkInt >= Build.VERSION_CODES.TIRAMISU) {
+                    Manifest.permission.READ_MEDIA_IMAGES
+                } else {
+                    Manifest.permission.READ_EXTERNAL_STORAGE
+                }
+                ContextCompat.checkSelfPermission(context, mediaPerm) == PackageManager.PERMISSION_GRANTED
             }
-            ContextCompat.checkSelfPermission(context, mediaPerm) == PackageManager.PERMISSION_GRANTED
         }
         PermissionId.Calendar ->
             ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CALENDAR) == PackageManager.PERMISSION_GRANTED

@@ -121,6 +121,8 @@ fun ActivityScreen(entries: List<ActivityLog.Entry>, onClear: () -> Unit) {
                     else -> RectangleShape
                 }
                 val sideColor = GlassBorderSubtle
+                val topEdgeColor = GlassBorderColor
+                val bottomEdgeColor = GlassBorderSubtle
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -132,10 +134,10 @@ fun ActivityScreen(entries: List<ActivityLog.Entry>, onClear: () -> Unit) {
                             drawLine(sideColor, Offset(0f, 0f), Offset(0f, size.height), strokeWidth = strokePx)
                             drawLine(sideColor, Offset(size.width, 0f), Offset(size.width, size.height), strokeWidth = strokePx)
                             if (isFirst) {
-                                drawLine(Color(0x47FFFFFF), Offset(0f, 0f), Offset(size.width, 0f), strokeWidth = strokePx)
+                                drawLine(topEdgeColor, Offset(0f, 0f), Offset(size.width, 0f), strokeWidth = strokePx)
                             }
                             if (isLast) {
-                                drawLine(Color(0x28FFFFFF), Offset(0f, size.height), Offset(size.width, size.height), strokeWidth = strokePx)
+                                drawLine(bottomEdgeColor, Offset(0f, size.height), Offset(size.width, size.height), strokeWidth = strokePx)
                             }
                         }
                         .padding(

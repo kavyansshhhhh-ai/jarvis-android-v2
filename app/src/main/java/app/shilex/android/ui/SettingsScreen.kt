@@ -161,7 +161,7 @@ private fun PermissionsSubScreen(
                         modifier = Modifier
                             .glassPressScale(interaction)
                             .clip(RoundedCornerShape(50))
-                            .background(Color(0x1CFFFFFF))
+                            .background(GlassSurfaceHighlight)
                             .border(0.8.dp, GlassBorderSubtle, RoundedCornerShape(50))
                             .clickable(interactionSource = interaction, indication = null, onClick = onBack)
                             .padding(horizontal = 12.dp, vertical = 7.dp),
@@ -230,6 +230,9 @@ private fun SettingsMainContent(
     val profile by assistant.personalProfile.collectAsStateWithLifecycle()
     val installedApps by assistant.installedApps.collectAsStateWithLifecycle()
 
+    val appearanceMode by assistant.appearanceModeState.collectAsStateWithLifecycle()
+    val liquidGlassEnabled by assistant.liquidGlassEnabledState.collectAsStateWithLifecycle()
+
     var permissionSnapshot by remember { mutableStateOf(PermissionRegistry.snapshot(context, activity)) }
     var showProfileEditor by remember { mutableStateOf(false) }
     var showAppsBrowser by remember { mutableStateOf(false) }
@@ -238,7 +241,6 @@ private fun SettingsMainContent(
     var engine by remember { mutableStateOf(assistant.speechEngine) }
     var dotOn by remember { mutableStateOf(assistant.wakeIndicator) }
     var dotDurationMs by remember { mutableLongStateOf(assistant.wakeDotDurationMs) }
-    var appearanceMode by remember { mutableStateOf(AppSettings(context).appearanceMode) }
 
     val micGranted = permissionSnapshot.deduplicatedItems
         .firstOrNull { it.spec.id == PermissionId.Microphone }
@@ -307,37 +309,107 @@ private fun SettingsMainContent(
         }
 
         item(key = "appearance") {
-            Section("Appearance") {
-                Text(
-                    "Choose how JARVIS looks across chat, settings, dialogs, and overlays.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = Muted,
-                )
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    AppearanceMode.entries.forEach { mode ->
-                        val selected = appearanceMode == mode
-                        Box(
-                            modifier = Modifier
-                                .weight(1f)
-                                .clip(RoundedCornerShape(14.dp))
-                                .background(if (selected) ElectricCyan.copy(alpha = 0.15f) else GlassSurfaceVariant)
-                                .border(
-                                    1.dp,
-                                    if (selected) ElectricCyan.copy(alpha = 0.62f) else GlassBorderSubtle,
-                                    RoundedCornerShape(14.dp),
+            Section("APPEARANCE") {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 10.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Text(
+                        "Display Mode",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = PureWhite,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        "Switch immediately between OLED Dark Mode, crisp Light Mode, or Android System Default.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Muted,
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        val displayOptions = listOf(
+                            AppearanceMode.Dark to "Dark Mode",
+                            AppearanceMode.Light to "Light Mode",
+                            AppearanceMode.System to "System Default",
+                        )
+                        displayOptions.forEach { (mode, label) ->
+                            val selected = appearanceMode == mode
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(14.dp))
+                                    .background(if (selected) ElectricCyan.copy(alpha = 0.16f) else GlassSurfaceVariant)
+                                    .border(
+                                        1.dp,
+                                        if (selected) ElectricCyan.copy(alpha = 0.65f) else GlassBorderSubtle,
+                                        RoundedCornerShape(14.dp),
+                                    )
+                                    .clickable {
+                                        assistant.appearanceMode = mode
+                                    }
+                                    .padding(vertical = 11.dp, horizontal = 4.dp),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text(
+                                    label,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = if (selected) ElectricCyan else PureWhite,
+                                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+                                    maxLines = 1,
                                 )
-                                .clickable {
-                                    appearanceMode = mode
-                                    AppSettings(context).appearanceMode = mode
-                                }
-                                .padding(vertical = 11.dp),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Text(
-                                mode.label,
-                                style = MaterialTheme.typography.labelLarge,
-                                color = if (selected) ElectricCyan else PureWhite,
-                            )
+                            }
+                        }
+                    }
+                }
+                GlassDivider()
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 10.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Text(
+                        "iOS Liquid Glass",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = PureWhite,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        if (liquidGlassEnabled) {
+                            "Enabled by default — translucent glass panels, subtle reflections, and smooth surfaces."
+                        } else {
+                            "Disabled — clean solid native JARVIS styling with minimal transparency."
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Muted,
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf(true to "Enabled", false to "Disabled").forEach { (enabledChoice, label) ->
+                            val selected = liquidGlassEnabled == enabledChoice
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(14.dp))
+                                    .background(if (selected) ElectricCyan.copy(alpha = 0.16f) else GlassSurfaceVariant)
+                                    .border(
+                                        1.dp,
+                                        if (selected) ElectricCyan.copy(alpha = 0.65f) else GlassBorderSubtle,
+                                        RoundedCornerShape(14.dp),
+                                    )
+                                    .clickable {
+                                        assistant.liquidGlassEnabled = enabledChoice
+                                    }
+                                    .padding(vertical = 11.dp),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text(
+                                    label,
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = if (selected) ElectricCyan else PureWhite,
+                                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+                                )
+                            }
                         }
                     }
                 }
@@ -364,13 +436,13 @@ private fun SettingsMainContent(
                                 ),
                             ),
                         )
-                        .border(1.dp, Color(0x80FFFFFF), CircleShape),
+                        .border(1.dp, GlassBorderColor, CircleShape),
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(
                         imageVector = MicIcon,
                         contentDescription = null,
-                        tint = Color(0xFF001A22),
+                        tint = MaterialTheme.colorScheme.onPrimary,
                         modifier = Modifier.size(22.dp),
                     )
                 }
@@ -779,10 +851,9 @@ private fun SettingsMainContent(
             InfoRow("Standby", "Between requests only the wake word runs; Gemini is completely disconnected.")
             GlassDivider()
             val memory = remember { MemoryStore(context) }
-            var notes by remember { mutableStateOf(memory.notes().size) }
-            LifecycleResumeEffect(Unit) {
-                notes = memory.notes().size
-                onPauseOrDispose { }
+            var notes by remember { mutableStateOf(0) }
+            LaunchedEffect(memory) {
+                notes = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { memory.notes().size }
             }
             InfoRow(
                 "What ${Branding.ASSISTANT_NAME} remembers",
@@ -850,13 +921,13 @@ private fun WakeDotSizeSliderRow(
             color = Muted,
         )
 
-        // Immediate real-size Liquid Glass dot preview on dark OLED backdrop
+        // Immediate real-size wake dot preview on dark OLED backdrop
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(98.dp)
                 .clip(RoundedCornerShape(18.dp))
-                .background(OledBlack)
+                .background(Color.Black)
                 .border(0.8.dp, GlassBorderSubtle, RoundedCornerShape(18.dp)),
             contentAlignment = Alignment.Center,
         ) {
@@ -864,7 +935,7 @@ private fun WakeDotSizeSliderRow(
             Text(
                 text = "Live preview • ${previewSize.coreDiameterDp}dp",
                 style = MaterialTheme.typography.labelSmall,
-                color = Muted.copy(alpha = 0.72f),
+                color = Color(0xB8D8E6EC),
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .padding(bottom = 6.dp),
@@ -887,7 +958,7 @@ private fun WakeDotSizeSliderRow(
             colors = SliderDefaults.colors(
                 thumbColor = PureWhite,
                 activeTrackColor = ElectricCyan,
-                inactiveTrackColor = Color(0x2EFFFFFF),
+                inactiveTrackColor = GlassBorderColor.copy(alpha = 0.65f),
             ),
             modifier = Modifier
                 .fillMaxWidth()
@@ -957,12 +1028,12 @@ private fun <T> OptionChoiceRow(
                             if (isSelected) {
                                 Brush.horizontalGradient(listOf(ElectricCyan.copy(alpha = 0.22f), NeonViolet.copy(alpha = 0.16f)))
                             } else {
-                                Brush.horizontalGradient(listOf(Color(0x16FFFFFF), Color(0x0CFFFFFF)))
+                                Brush.horizontalGradient(listOf(GlassSurfaceVariant, GlassSurfaceVariant))
                             },
                         )
                         .border(
                             0.9.dp,
-                            if (isSelected) ElectricCyan.copy(alpha = 0.65f) else Color(0x26FFFFFF),
+                            if (isSelected) ElectricCyan.copy(alpha = 0.65f) else GlassBorderSubtle,
                             shape,
                         )
                         .clickable(

@@ -128,11 +128,12 @@ fun HomeScreen(
     val context = LocalContext.current
     var inputText by rememberSaveable { mutableStateOf("") }
     var isListeningSpeech by remember { mutableStateOf(false) }
+    var speechHint by remember { mutableStateOf<String?>(null) }
 
     var speechRecognizer by remember { mutableStateOf<SpeechRecognizer?>(null) }
     DisposableEffect(Unit) {
         onDispose {
-            speechRecognizer?.destroy()
+            runCatching { speechRecognizer?.destroy() }
             speechRecognizer = null
         }
     }
@@ -162,15 +163,19 @@ fun HomeScreen(
         if (!granted) {
             PermissionRegistry.markRequested(context, Manifest.permission.RECORD_AUDIO)
             askMic.launch(Manifest.permission.RECORD_AUDIO)
+        } else if (!SpeechRecognizer.isRecognitionAvailable(context)) {
+            speechHint = "Speech recognition service is unavailable on this device."
         } else {
+            speechHint = null
             runCatching {
-                val recognizer = speechRecognizer ?: runCatching {
-                    SpeechRecognizer.createSpeechRecognizer(context)
-                }.getOrNull()?.also { speechRecognizer = it }
                 if (isListeningSpeech) {
-                    recognizer?.stopListening()
+                    speechRecognizer?.stopListening()
                     isListeningSpeech = false
-                } else if (recognizer != null) {
+                } else {
+                    speechRecognizer?.destroy()
+                    speechRecognizer = null
+                    val recognizer = SpeechRecognizer.createSpeechRecognizer(context)
+                    speechRecognizer = recognizer
                     val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
                         putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
                         putExtra(RecognizerIntent.EXTRA_LANGUAGE, "hi-IN")
@@ -182,12 +187,28 @@ fun HomeScreen(
                         override fun onRmsChanged(rmsdB: Float) {}
                         override fun onBufferReceived(buffer: ByteArray?) {}
                         override fun onEndOfSpeech() { isListeningSpeech = false }
-                        override fun onError(error: Int) { isListeningSpeech = false }
+                        override fun onError(error: Int) {
+                            isListeningSpeech = false
+                            runCatching { recognizer.destroy() }
+                            if (speechRecognizer === recognizer) {
+                                speechRecognizer = null
+                            }
+                            if (error == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS ||
+                                error == SpeechRecognizer.ERROR_NETWORK ||
+                                error == SpeechRecognizer.ERROR_SERVER
+                            ) {
+                                speechHint = "Voice input could not listen right now."
+                            }
+                        }
                         override fun onResults(results: Bundle?) {
                             isListeningSpeech = false
                             val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                             if (!matches.isNullOrEmpty()) {
                                 inputText = matches[0]
+                            }
+                            runCatching { recognizer.destroy() }
+                            if (speechRecognizer === recognizer) {
+                                speechRecognizer = null
                             }
                         }
                         override fun onPartialResults(partialResults: Bundle?) {
@@ -201,6 +222,11 @@ fun HomeScreen(
                     recognizer.startListening(intent)
                     isListeningSpeech = true
                 }
+            }.onFailure {
+                isListeningSpeech = false
+                runCatching { speechRecognizer?.destroy() }
+                speechRecognizer = null
+                speechHint = "Voice input is unavailable on this device."
             }
         }
     }
@@ -208,9 +234,7 @@ fun HomeScreen(
     val now = status(state, localPhase, wakeOn)
     val problem = state.problem != null && !now.live
     val inConversation = state.phase != Phase.Off || state.lines.isNotEmpty()
-    val recentTask = remember(task, now.live) {
-        task?.takeIf { now.live || System.currentTimeMillis() - it.at < TASK_SHOWN_MS }
-    }
+    val recentTask = task?.takeIf { now.live || System.currentTimeMillis() - it.at < TASK_SHOWN_MS }
 
     Column(
         Modifier
@@ -250,7 +274,7 @@ fun HomeScreen(
                         modifier = Modifier
                             .padding(start = 8.dp)
                             .size(7.dp)
-                            .background(if (now.live) ElectricCyan else Color(0x38FFFFFF), CircleShape)
+                            .background(if (now.live) ElectricCyan else GlassBorderColor, CircleShape)
                             .then(
                                 if (now.live) {
                                     Modifier.shadow(4.dp, CircleShape, ambientColor = ElectricCyan, spotColor = ElectricCyan)
@@ -357,9 +381,17 @@ fun HomeScreen(
         }
 
         // Permanent Message Input Bar at the bottom (anchored above navigation dock)
+        speechHint?.let { hint ->
+            Text(
+                text = hint,
+                style = MaterialTheme.typography.bodySmall,
+                color = AmberWarning,
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+            )
+        }
         ChatInputBar(
             text = inputText,
-            onTextChanged = { inputText = it },
+            onTextChanged = { inputText = it; speechHint = null },
             onSend = {
                 val msg = inputText.trim()
                 if (msg.isNotEmpty()) {
@@ -389,14 +421,15 @@ private fun ChatInputBar(
     onStopLive: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val shape = RoundedCornerShape(28.dp)
+    val glassEnabled = currentLiquidGlassEnabled()
+    val shape = remember(glassEnabled) { RoundedCornerShape(if (glassEnabled) 28.dp else 20.dp) }
     val haptic = LocalHapticFeedback.current
 
     Row(
         modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = 4.dp)
-            .shadow(12.dp, shape, ambientColor = Color.Black, spotColor = Color.Black)
+            .shadow(if (glassEnabled) 12.dp else 5.dp, shape, ambientColor = Color.Black.copy(alpha = 0.35f), spotColor = Color.Black.copy(alpha = 0.35f))
             .clip(shape)
             .background(GlassSurfaceGradient)
             .border(1.dp, GlassBorderGradient, shape)
@@ -410,8 +443,8 @@ private fun ChatInputBar(
                 .glassPressScale(micInteraction)
                 .size(42.dp)
                 .clip(CircleShape)
-                .background(if (isListening) CoralError.copy(alpha = 0.25f) else Color(0x1EFFFFFF))
-                .border(0.8.dp, if (isListening) CoralError else Color(0x33FFFFFF), CircleShape)
+                .background(if (isListening) CoralError.copy(alpha = 0.25f) else GlassSurfaceHighlight)
+                .border(0.8.dp, if (isListening) CoralError else GlassBorderSubtle, CircleShape)
                 .clickable(interactionSource = micInteraction, indication = null) {
                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                     onMicClick()
@@ -464,13 +497,13 @@ private fun ChatInputBar(
                 .background(
                     brush = if (live) LiveStopButtonGradient
                     else if (canSend) TalkButtonGradient
-                    else SolidColor(Color(0x14FFFFFF)),
+                    else SolidColor(GlassSurfaceHighlight),
                 )
                 .border(
                     0.8.dp,
                     if (live) CoralError.copy(alpha = 0.6f)
                     else if (canSend) ElectricCyan.copy(alpha = 0.6f)
-                    else Color(0x22FFFFFF),
+                    else GlassBorderSubtle,
                     CircleShape,
                 )
                 .clickable(
@@ -489,7 +522,7 @@ private fun ChatInputBar(
             Icon(
                 imageVector = if (live) Icons.Filled.Close else Icons.AutoMirrored.Filled.Send,
                 contentDescription = if (live) "Stop" else "Send",
-                tint = if (live) PureWhite else if (canSend) Color(0xFF001E26) else Muted,
+                tint = if (live) Color.White else if (canSend) MaterialTheme.colorScheme.onPrimary else Muted,
                 modifier = Modifier.size(18.dp),
             )
         }
@@ -639,13 +672,13 @@ private fun ChatConversation(lines: List<Line>, modifier: Modifier) {
                         Modifier
                             .clip(userShape)
                             .background(brush = UserChatBubbleGradient)
-                            .border(1.dp, Color(0x66FFFFFF), userShape)
+                            .border(1.dp, GlassBorderSubtle, userShape)
                             .padding(horizontal = 15.dp, vertical = 10.dp),
                     ) {
                         Text(
                             line.text,
                             style = MaterialTheme.typography.bodyMedium,
-                            color = Color.White,
+                            color = MaterialTheme.colorScheme.onPrimary,
                             fontWeight = FontWeight.Medium,
                         )
                     }

@@ -142,8 +142,13 @@ class VoiceService : Service() {
         }
         wake.stop()
         WakeActivationOverlay.dismiss(this)
+        if (!foreground) {
+            // Android 12/13+ throws ForegroundServiceDidNotStartInTimeException if started via
+            // startForegroundService and stopped via stopSelf without calling startForeground first.
+            show(wakeNotification())
+        }
         if (foreground) {
-            ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
+            runCatching { ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE) }
             foreground = false
         }
         syncState(this)
@@ -265,10 +270,16 @@ class VoiceService : Service() {
     private fun show(notification: Notification) {
         if (!foreground) {
             val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE else 0
-            ServiceCompat.startForeground(this, NOTIFICATION_ID, notification, type)
-            foreground = true
+            val ok = runCatching {
+                ServiceCompat.startForeground(this, NOTIFICATION_ID, notification, type)
+            }.onFailure { err ->
+                Diag.w("service: startForeground failed (${err.javaClass.simpleName})")
+            }.isSuccess
+            foreground = ok
         } else {
-            getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, notification)
+            runCatching {
+                getSystemService(NotificationManager::class.java)?.notify(NOTIFICATION_ID, notification)
+            }
         }
     }
 

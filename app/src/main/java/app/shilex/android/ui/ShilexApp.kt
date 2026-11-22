@@ -1,6 +1,7 @@
 package app.shilex.android.ui
 
 import android.app.Activity
+import android.app.ActivityManager
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.IntentSenderRequest
@@ -149,14 +150,20 @@ fun ShilexApp(assistant: AssistantViewModel) {
     }
 
     ShilexTheme {
+        val appContext = LocalContext.current
+        val glassEnabled = currentLiquidGlassEnabled()
+        val lowRamDevice = remember(appContext) {
+            appContext.getSystemService(ActivityManager::class.java)?.isLowRamDevice == true
+        }
         CompositionLocalProvider(LocalModalOverlayActive provides { modalOverlayActive = it }) {
             Surface(
                 color = OledBlack,
                 contentColor = PureWhite,
                 modifier = Modifier.fillMaxSize(),
             ) {
+                val blurEnabled = glassEnabled && !lowRamDevice && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
                 val modalBlur by animateDpAsState(
-                    targetValue = if (modalOverlayActive && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) 16.dp else 0.dp,
+                    targetValue = if (modalOverlayActive && blurEnabled) 14.dp else 0.dp,
                     animationSpec = tween(durationMillis = 220),
                     label = "modalBlur",
                 )
@@ -297,64 +304,106 @@ private fun FloatingLiquidGlassDock(
     onSelectTab: (Int) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val dockShape = remember { RoundedCornerShape(34.dp) }
-    val lensShape = remember { RoundedCornerShape(28.dp) }
+    val glassEnabled = currentLiquidGlassEnabled()
+    val dockShape = remember(glassEnabled) { RoundedCornerShape(if (glassEnabled) 34.dp else 22.dp) }
+    val lensShape = remember(glassEnabled) { RoundedCornerShape(if (glassEnabled) 28.dp else 18.dp) }
     val haptic = LocalHapticFeedback.current
     val coroutineScope = rememberCoroutineScope()
     val cyanAccent = ElectricCyan
     val violetAccent = NeonViolet
+    val onBg = PureWhite
+    val borderColor = GlassBorderColor
 
-    val rimBrush = remember {
-        Brush.verticalGradient(
-            listOf(
-                Color(0x1CFFFFFF),
-                Color.Transparent,
-                Color(0x0AFFFFFF),
-            ),
-        )
+    val rimBrush = remember(glassEnabled, onBg) {
+        if (glassEnabled) {
+            Brush.verticalGradient(
+                listOf(
+                    onBg.copy(alpha = 0.11f),
+                    Color.Transparent,
+                    onBg.copy(alpha = 0.04f),
+                ),
+            )
+        } else {
+            Brush.verticalGradient(listOf(Color.Transparent, Color.Transparent))
+        }
     }
-    val lensIdleBrush = remember {
-        Brush.verticalGradient(
-            listOf(
-                Color(0x30FFFFFF),
-                Color(0x14FFFFFF),
-            ),
-        )
+    val lensIdleBrush = remember(glassEnabled, cyanAccent, onBg) {
+        if (glassEnabled) {
+            Brush.verticalGradient(
+                listOf(
+                    onBg.copy(alpha = 0.16f),
+                    onBg.copy(alpha = 0.07f),
+                ),
+            )
+        } else {
+            Brush.verticalGradient(
+                listOf(
+                    cyanAccent.copy(alpha = 0.16f),
+                    cyanAccent.copy(alpha = 0.12f),
+                ),
+            )
+        }
     }
-    val lensActiveBrush = remember {
-        Brush.verticalGradient(
-            listOf(
-                Color(0x42FFFFFF),
-                Color(0x18FFFFFF),
-            ),
-        )
+    val lensActiveBrush = remember(glassEnabled, cyanAccent, onBg) {
+        if (glassEnabled) {
+            Brush.verticalGradient(
+                listOf(
+                    onBg.copy(alpha = 0.24f),
+                    onBg.copy(alpha = 0.09f),
+                ),
+            )
+        } else {
+            Brush.verticalGradient(
+                listOf(
+                    cyanAccent.copy(alpha = 0.22f),
+                    cyanAccent.copy(alpha = 0.16f),
+                ),
+            )
+        }
     }
-    val lensRadialIdleBrush = remember(cyanAccent, violetAccent) {
-        Brush.radialGradient(
-            listOf(
-                cyanAccent.copy(alpha = 0.14f),
-                violetAccent.copy(alpha = 0.08f),
-                Color.Transparent,
-            ),
-        )
+    val lensRadialIdleBrush = remember(glassEnabled, cyanAccent, violetAccent) {
+        if (glassEnabled) {
+            Brush.radialGradient(
+                listOf(
+                    cyanAccent.copy(alpha = 0.14f),
+                    violetAccent.copy(alpha = 0.08f),
+                    Color.Transparent,
+                ),
+            )
+        } else {
+            Brush.horizontalGradient(listOf(Color.Transparent, Color.Transparent))
+        }
     }
-    val lensRadialActiveBrush = remember(cyanAccent, violetAccent) {
-        Brush.radialGradient(
-            listOf(
-                cyanAccent.copy(alpha = 0.24f),
-                violetAccent.copy(alpha = 0.10f),
-                Color.Transparent,
-            ),
-        )
+    val lensRadialActiveBrush = remember(glassEnabled, cyanAccent, violetAccent) {
+        if (glassEnabled) {
+            Brush.radialGradient(
+                listOf(
+                    cyanAccent.copy(alpha = 0.24f),
+                    violetAccent.copy(alpha = 0.10f),
+                    Color.Transparent,
+                ),
+            )
+        } else {
+            Brush.horizontalGradient(listOf(Color.Transparent, Color.Transparent))
+        }
     }
-    val lensBorderBrush = remember {
-        Brush.verticalGradient(
-            listOf(
-                Color(0x7AFFFFFF),
-                Color(0x22FFFFFF),
-                Color(0x3BFFFFFF),
-            ),
-        )
+    val lensBorderBrush = remember(glassEnabled, borderColor, cyanAccent) {
+        if (glassEnabled) {
+            Brush.verticalGradient(
+                listOf(
+                    borderColor.copy(alpha = 0.90f),
+                    borderColor.copy(alpha = 0.25f),
+                    borderColor.copy(alpha = 0.45f),
+                ),
+            )
+        } else {
+            Brush.verticalGradient(
+                listOf(
+                    cyanAccent.copy(alpha = 0.45f),
+                    cyanAccent.copy(alpha = 0.45f),
+                ),
+            )
+        }
     }
 
     var isPressed by remember { mutableStateOf(false) }
@@ -367,15 +416,15 @@ private fun FloatingLiquidGlassDock(
             .fillMaxWidth()
             .height(FloatingDockHeight)
             .shadow(
-                elevation = 20.dp,
+                elevation = if (glassEnabled) 18.dp else 8.dp,
                 shape = dockShape,
-                ambientColor = Color.Black,
-                spotColor = Color.Black,
+                ambientColor = Color.Black.copy(alpha = 0.45f),
+                spotColor = Color.Black.copy(alpha = 0.45f),
             )
             .clip(dockShape),
     ) {
 
-        // Smoked obsidian glass tint + top specular rim
+        // Dock tint + optional Liquid Glass specular rim
         Box(
             modifier = Modifier
                 .matchParentSize()

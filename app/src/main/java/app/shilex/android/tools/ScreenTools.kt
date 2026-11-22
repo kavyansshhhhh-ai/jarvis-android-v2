@@ -37,7 +37,7 @@ object ScreenTools {
         UiScroll,
         UiKey,
         HandToUser,
-        GalleryTools.DeletePhoto,
+        *GalleryTools.all().toTypedArray(),
     )
 
     private fun control(): Pair<ControlService?, JSONObject?> {
@@ -228,7 +228,7 @@ object ScreenTools {
             }
             val key = KeyVault(host.context).read(KeyVault.GEMINI_KEY)
                 ?: return Results.failed("no_key", "Understanding photos needs the Gemini API key in Settings.")
-            if (!service.overlay.confirm("Inspect visible image in $fgLabel with Gemini Vision")) {
+            if (pkg !in GALLERY_PACKAGES && !service.overlay.confirm("Inspect visible image in $fgLabel with Gemini Vision")) {
                 return Results.failed("cancelled", "The user didn't allow sharing the visible screen.")
             }
             return when (val shot = service.captureScreenshotResult()) {
@@ -777,6 +777,20 @@ object ScreenTools {
             "quick_settings" to AccessibilityService.GLOBAL_ACTION_QUICK_SETTINGS,
         )
     }
+
+    private val GALLERY_PACKAGES = setOf(
+        "com.google.android.apps.photos",
+        "com.miui.gallery",
+        "com.sec.android.gallery3d",
+        "com.oneplus.gallery",
+        "com.coloros.gallery3d",
+        "com.oplus.gallery",
+        "com.vivo.gallery",
+        "com.android.gallery3d",
+        "com.motorola.MotGallery2",
+        "com.simplemobiletools.gallery",
+        "com.simplemobiletools.gallery.pro",
+    )
 
     private const val SETTLE_MS = 900L
 }

@@ -69,17 +69,14 @@ fun PersonalProfileDialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false),
     ) {
-        val shape = RoundedCornerShape(28.dp)
+        val glassEnabled = currentLiquidGlassEnabled()
+        val shape = RoundedCornerShape(if (glassEnabled) 28.dp else 18.dp)
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 20.dp, vertical = 24.dp)
                 .clip(shape)
-                .background(
-                    Brush.verticalGradient(
-                        listOf(Color(0xF511131A), Color(0xEC090B10)),
-                    ),
-                )
+                .background(GlassSurfaceGradient)
                 .border(1.dp, GlassBorderGradient, shape)
                 .padding(20.dp),
         ) {
@@ -155,7 +152,7 @@ fun PersonalProfileDialog(
                         },
                         colors = ButtonDefaults.buttonColors(
                             containerColor = ElectricCyan,
-                            contentColor = Color(0xFF001E26),
+                            contentColor = MaterialTheme.colorScheme.onPrimary,
                         ),
                         shape = RoundedCornerShape(50),
                     ) {
@@ -185,12 +182,12 @@ private fun ProfileField(
             focusedTextColor = PureWhite,
             unfocusedTextColor = PureWhite,
             focusedBorderColor = ElectricCyan,
-            unfocusedBorderColor = Color(0x33FFFFFF),
+            unfocusedBorderColor = GlassBorderSubtle,
             focusedLabelColor = ElectricCyan,
             unfocusedLabelColor = Muted,
             cursorColor = ElectricCyan,
-            focusedContainerColor = Color(0x14FFFFFF),
-            unfocusedContainerColor = Color(0x0CFFFFFF),
+            focusedContainerColor = GlassSurfaceHighlight,
+            unfocusedContainerColor = GlassSurfaceVariant,
         ),
         modifier = Modifier.fillMaxWidth(),
     )

@@ -69,6 +69,12 @@ android {
             matchingFallbacks += listOf("debug")
             signingConfig = signingConfigs.getByName("v2Fix")
         }
+        create("v21") {
+            initWith(getByName("debug"))
+            applicationIdSuffix = ".v21"
+            matchingFallbacks += listOf("debug")
+            resValue("string", "app_name", "JARVIS V2.1")
+        }
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -227,6 +233,13 @@ androidComponents {
         }
         variant.packaging.jniLibs.useLegacyPackaging.set(true)
     }
+    onVariants(selector().withBuildType("v21")) { variant ->
+        variant.outputs.forEach { output ->
+            output.versionCode.set(4)
+            output.versionName.set("2.1.0")
+        }
+        variant.packaging.jniLibs.useLegacyPackaging.set(true)
+    }
 }
 
 tasks.matching { it.name == "assembleV2" }.configureEach {
@@ -253,6 +266,20 @@ tasks.matching { it.name == "assembleV2Fix" }.configureEach {
         val targetApk = outDir.resolve("JARVIS-V2-INSTALL-FIX-2.0.1.apk")
         sourceApk.copyTo(targetApk, overwrite = true)
         logger.lifecycle("Version 2.0.1 APK emitted: ${targetApk.absolutePath} (${targetApk.length()} bytes)")
+    }
+}
+
+tasks.matching { it.name == "assembleV21" }.configureEach {
+    doLast {
+        val outDir = layout.buildDirectory.dir("outputs/apk/v21").get().asFile
+        val sourceApk = outDir.resolve("app-v21.apk").takeIf { it.exists() }
+            ?: outDir.listFiles { f ->
+                f.isFile && f.extension == "apk" && f.name != "JARVIS-V2.1-2.1.0.apk"
+            }?.firstOrNull()
+            ?: throw GradleException("Expected built v21 APK in ${outDir.absolutePath}")
+        val targetApk = outDir.resolve("JARVIS-V2.1-2.1.0.apk")
+        sourceApk.copyTo(targetApk, overwrite = true)
+        logger.lifecycle("Version 2.1.0 APK emitted: ${targetApk.absolutePath} (${targetApk.length()} bytes)")
     }
 }
 

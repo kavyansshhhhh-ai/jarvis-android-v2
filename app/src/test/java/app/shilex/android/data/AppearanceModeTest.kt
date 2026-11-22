@@ -1,6 +1,7 @@
 package app.shilex.android.data
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class AppearanceModeTest {
@@ -11,5 +12,10 @@ class AppearanceModeTest {
         assertEquals(AppearanceMode.System, AppearanceMode.from("system"))
         assertEquals(AppearanceMode.Dark, AppearanceMode.from(null))
         assertEquals(AppearanceMode.Dark, AppearanceMode.from("unknown"))
+    }
+
+    @Test
+    fun liquidGlassIsEnabledByDefaultForNewInstallations() {
+        assertTrue(Settings.DEFAULT_LIQUID_GLASS_ENABLED)
     }
 }
